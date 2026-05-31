@@ -1,0 +1,313 @@
+--// ╔════════════════════════════════════════════╗
+--// ║     ANTI AFK V3 - OPTIMIZED LAG FREE       ║
+--// ║  Đã xóa CaptureController • Không khựng FPS ║
+--// ║  Dùng Chuột Phải (0,0) an toàn, mượt mà     ║
+--// ╚════════════════════════════════════════════╝
+
+local Players          = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local VirtualUser      = game:GetService("VirtualUser")
+
+local player = Players.LocalPlayer
+if not player then return end
+local playerGui = player:WaitForChild("PlayerGui")
+
+--================================================
+-- CONFIG
+--================================================
+local AFK_MIN  = 8 * 60    
+local AFK_MAX  = 14 * 60   
+
+--================================================
+-- CLEANUP
+--================================================
+if getgenv and getgenv()._AntiAFK_V3 then
+    local old = getgenv()._AntiAFK_V3
+    for _, c in ipairs(old.conns or {}) do
+        pcall(function() c:Disconnect() end)
+    end
+    pcall(function() task.cancel(old.mainThread) end)
+    pcall(function() task.cancel(old.uiThread)   end)
+end
+
+local oldGui = playerGui:FindFirstChild("AntiAFK_V3")
+if oldGui then oldGui:Destroy() end
+
+--================================================
+-- STATE
+--================================================
+local enabled     = true
+local appFocused  = true
+local lastInput   = os.clock()
+local scriptStart = os.clock()
+local triggered   = false
+local conns       = {}
+
+--================================================
+-- HELPERS
+--================================================
+local function fmtTime(s)
+    s = math.floor(s)
+    return string.format("%02d:%02d:%02d",
+        math.floor(s / 3600),
+        math.floor(s % 3600 / 60),
+        s % 60)
+end
+
+local function fmtUptime(s)
+    s = math.floor(s)
+    local d = math.floor(s / 86400)
+    local h = math.floor(s % 86400 / 3600)
+    local m = math.floor(s % 3600 / 60)
+    local sc = s % 60
+    if d > 0 then
+        return string.format("%dd %02d:%02d:%02d", d, h, m, sc)
+    end
+    return string.format("%02d:%02d:%02d", h, m, sc)
+end
+
+local function resetIdle()
+    lastInput = os.clock()
+end
+
+--================================================
+-- GUI
+--================================================
+local sg = Instance.new("ScreenGui")
+sg.Name         = "AntiAFK_V3"
+sg.ResetOnSpawn = false
+sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+sg.Parent       = playerGui
+
+local border = Instance.new("Frame")
+border.Name                   = "Border"
+border.Size                   = UDim2.new(0, 196, 0, 74)
+border.Position               = UDim2.new(0, 11, 0, 11)
+border.BackgroundColor3       = Color3.fromRGB(0, 200, 110)
+border.BackgroundTransparency = 0.55
+border.BorderSizePixel        = 0
+border.Parent                 = sg
+Instance.new("UICorner", border).CornerRadius = UDim.new(0, 9)
+
+local frame = Instance.new("Frame")
+frame.Name                   = "Main"
+frame.Size                   = UDim2.new(0, 192, 0, 70)
+frame.Position               = UDim2.new(0, 2, 0, 2)
+frame.BackgroundColor3       = Color3.fromRGB(10, 11, 13)
+frame.BackgroundTransparency = 0.1
+frame.BorderSizePixel        = 0
+frame.Parent                 = border
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+
+local lblTop = Instance.new("TextLabel")
+lblTop.Size               = UDim2.new(1, -58, 0, 18)
+lblTop.Position           = UDim2.new(0, 8, 0, 4)
+lblTop.BackgroundTransparency = 1
+lblTop.TextColor3         = Color3.fromRGB(0, 200, 110)
+lblTop.Font               = Enum.Font.GothamBold
+lblTop.TextSize           = 12
+lblTop.TextXAlignment     = Enum.TextXAlignment.Left
+lblTop.Text               = "◈ ANTI-AFK V3"
+lblTop.Parent             = frame
+
+local btnToggle = Instance.new("TextButton")
+btnToggle.Size              = UDim2.new(0, 44, 0, 16)
+btnToggle.Position          = UDim2.new(1, -50, 0, 5)
+btnToggle.BackgroundColor3  = Color3.fromRGB(0, 140, 75)
+btnToggle.TextColor3        = Color3.fromRGB(255, 255, 255)
+btnToggle.Font              = Enum.Font.GothamBold
+btnToggle.TextSize          = 10
+btnToggle.Text              = "ON"
+btnToggle.BorderSizePixel   = 0
+btnToggle.Parent            = frame
+Instance.new("UICorner", btnToggle).CornerRadius = UDim.new(0, 4)
+
+local lblIdle = Instance.new("TextLabel")
+lblIdle.Size              = UDim2.new(1, -10, 0, 17)
+lblIdle.Position          = UDim2.new(0, 8, 0, 26)
+lblIdle.BackgroundTransparency = 1
+lblIdle.TextColor3        = Color3.fromRGB(200, 200, 200)
+lblIdle.Font              = Enum.Font.RobotoMono
+lblIdle.TextSize          = 12
+lblIdle.TextXAlignment    = Enum.TextXAlignment.Left
+lblIdle.Text              = "Idle:   00:00:00"
+lblIdle.Parent            = frame
+
+local lblUp = Instance.new("TextLabel")
+lblUp.Size               = UDim2.new(1, -10, 0, 17)
+lblUp.Position           = UDim2.new(0, 8, 0, 45)
+lblUp.BackgroundTransparency = 1
+lblUp.TextColor3         = Color3.fromRGB(110, 110, 120)
+lblUp.Font               = Enum.Font.RobotoMono
+lblUp.TextSize           = 11
+lblUp.TextXAlignment     = Enum.TextXAlignment.Left
+lblUp.Text               = "Up:     00:00:00"
+lblUp.Parent             = frame
+
+--================================================
+-- TOGGLE
+--================================================
+local function setStatus(active)
+    enabled = active
+    if active then
+        btnToggle.Text            = "ON"
+        btnToggle.BackgroundColor3 = Color3.fromRGB(0, 140, 75)
+        lblTop.TextColor3         = Color3.fromRGB(0, 200, 110)
+        border.BackgroundColor3   = Color3.fromRGB(0, 200, 110)
+    else
+        btnToggle.Text            = "OFF"
+        btnToggle.BackgroundColor3 = Color3.fromRGB(150, 30, 30)
+        lblTop.TextColor3         = Color3.fromRGB(200, 55, 55)
+        border.BackgroundColor3   = Color3.fromRGB(200, 55, 55)
+        lblIdle.Text              = "Idle:   --:--:--"
+    end
+end
+
+btnToggle.MouseButton1Click:Connect(function()
+    setStatus(not enabled)
+end)
+
+--================================================
+-- CUSTOM DRAG
+--================================================
+do
+    local dragging = false
+    local dragStart, startPos
+    local dragConn = nil
+
+    frame.InputBegan:Connect(function(input)
+        local t = input.UserInputType
+        if t ~= Enum.UserInputType.MouseButton1
+        and t ~= Enum.UserInputType.Touch then return end
+
+        dragging  = true
+        dragStart = input.Position
+        startPos  = border.Position
+
+        if dragConn then
+            dragConn:Disconnect()
+            dragConn = nil
+        end
+
+        dragConn = input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+                if dragConn then
+                    dragConn:Disconnect()
+                    dragConn = nil
+                end
+            end
+        end)
+    end)
+
+    table.insert(conns,
+        UserInputService.InputChanged:Connect(function(input)
+            if not dragging then return end
+            local t = input.UserInputType
+            if t ~= Enum.UserInputType.MouseMovement
+            and t ~= Enum.UserInputType.Touch then return end
+
+            local delta = input.Position - dragStart
+            local newX  = startPos.X.Offset + delta.X
+            local newY  = startPos.Y.Offset + delta.Y
+
+            local vp = workspace.CurrentCamera
+                and workspace.CurrentCamera.ViewportSize
+                or Vector2.new(800, 600)
+            newX = math.clamp(newX, 0, vp.X - border.AbsoluteSize.X)
+            newY = math.clamp(newY, 0, vp.Y - border.AbsoluteSize.Y)
+
+            border.Position = UDim2.new(0, newX, 0, newY)
+        end)
+    )
+end
+
+--================================================
+-- BYPASS AFK (FIXED: KHÔNG CÒN LAG)
+--================================================
+local function bypassAFK()
+    if triggered then return end
+    triggered = true
+
+    -- Sử dụng Chuột Phải (Button2) tại góc (0,0) cực kỳ nhẹ, không lag, không dính UI
+    pcall(function()
+        VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+        task.wait(0.02)
+        VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+    end)
+
+    lastInput = os.clock()
+    task.delay(0.5, function() triggered = false end)
+end
+
+--================================================
+-- CONNECTIONS
+--================================================
+table.insert(conns,
+    player.Idled:Connect(function()
+        if enabled then bypassAFK() end
+    end)
+)
+
+table.insert(conns,
+    UserInputService.InputBegan:Connect(function(input)
+        if not enabled then return end
+        local t = input.UserInputType
+        if t == Enum.UserInputType.MouseButton1
+        or t == Enum.UserInputType.Touch
+        or t == Enum.UserInputType.Keyboard
+        or t == Enum.UserInputType.Gamepad1 then
+            resetIdle()
+        end
+    end)
+)
+
+table.insert(conns,
+    UserInputService.WindowFocusReleased:Connect(function()
+        appFocused = false
+    end)
+)
+table.insert(conns,
+    UserInputService.WindowFocused:Connect(function()
+        appFocused = true
+        resetIdle()
+    end)
+)
+
+--================================================
+-- LUỒNG 1: UI Update
+--================================================
+local uiThread = task.spawn(function()
+    while true do
+        task.wait(1)
+        local uptime = os.clock() - scriptStart
+        lblUp.Text = "Up:     " .. fmtUptime(uptime)
+
+        if appFocused and enabled then
+            local idle = os.clock() - lastInput
+            lblIdle.Text = "Idle:   " .. fmtTime(idle)
+        end
+    end
+end)
+
+--================================================
+-- LUỒNG 2: Logic Backup Thread
+--================================================
+local mainThread = task.spawn(function()
+    local nextAFK = os.clock() + math.random(AFK_MIN, AFK_MAX)
+    while true do
+        task.wait(5) 
+        if enabled and os.clock() >= nextAFK then
+            bypassAFK()
+            nextAFK = os.clock() + math.random(AFK_MIN, AFK_MAX)
+        end
+    end
+end)
+
+if getgenv then
+    getgenv()._AntiAFK_V3 = {
+        conns      = conns,
+        mainThread = mainThread,
+        uiThread   = uiThread,
+    }
+end
