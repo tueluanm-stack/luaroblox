@@ -1,0 +1,134 @@
+-- Khai báo các dịch vụ cần thiết
+local Players = game:GetService("Players")
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+local buttonPaths = {
+    PlayAgain   = "MainHud.Menus.GameOver.Menu.OptionButtons.PlayAgain",
+    Play        = "MainHud.Elements.MapModeVote.MapsVoting.Elevator.Main.MenuList.RoomList.PlayButton",
+    Difficulty3 = "MainHud.Elements.DifficultyVote.Listings.FlashList.1.Content.3.2.ListItem.Item.Content.ChooseButton",
+    StartGame   = "MainHud.Elements.StartGame.StartGameButton"
+}
+
+-- [MỚI] Bảng lưu trữ thời gian Cooldown để chống Spam Click
+local clickCooldowns = {}
+local COOLDOWN_TIME = 2.5 -- Đợi 2.5 giây sau khi ấn mới được ấn lại NÚT ĐÓ
+
+local function safeClick(button)
+    if button and button.Visible and button.Active then
+        local guiService = game:GetService("GuiService")
+        local oldSelected = guiService.SelectedObject
+        
+        guiService.SelectedObject = button
+        task.wait(0.01)
+        
+        local clicked = false
+        
+        pcall(function()
+            if getconnections then
+                for _, connection in pairs(getconnections(button.MouseButton1Click)) do connection:Fire() clicked = true end
+                for _, connection in pairs(getconnections(button.MouseButton1Down)) do connection:Fire() clicked = true end
+                for _, connection in pairs(getconnections(button.Activated)) do connection:Fire() clicked = true end
+            end
+        end)
+        
+        if not clicked then
+            pcall(function()
+                if button:IsA("TextButton") or button:IsA("ImageButton") then
+                    button:SimulateClick()
+                    clicked = true
+                end
+            end)
+        end
+        
+        if not clicked then
+            pcall(function()
+                local virtualInput = game:GetService("VirtualInputManager")
+                virtualInput:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
+                virtualInput:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
+            end)
+        end
+        
+        guiService.SelectedObject = oldSelected
+    end
+end
+
+local function findButtonByPath(path)
+    local current = playerGui
+    for name in string.gmatch(path, "[^.]+") do
+        if current then
+            current = current:FindFirstChild(name)
+        else
+            return nil
+        end
+    end
+    return current
+end
+
+local function isButtonGloballyVisible(button)
+    if not button then return false end
+    
+    local current = button
+    while current and current ~= playerGui do
+        if current:IsA("GuiObject") and not current.Visible then
+            return false
+        end
+        current = current.Parent
+    end
+    return true
+end
+
+local function checkAndClickAll()
+    local currentTime = os.clock() -- Lấy thời gian hiện tại của hệ thống (chính xác hơn tick)
+    
+    for name, path in pairs(buttonPaths) do
+        local button = findButtonByPath(path)
+        
+        if button and isButtonGloballyVisible(button) then
+            -- [MỚI] Kiểm tra Cooldown: Nếu chưa từng click, hoặc thời gian trôi qua đã lớn hơn COOLDOWN_TIME
+            if not clickCooldowns[name] or (currentTime - clickCooldowns[name]) >= COOLDOWN_TIME then
+                
+                clickCooldowns[name] = currentTime -- Ghi nhận lại thời gian vừa click
+                safeClick(button)
+                print("[Auto Farm] Đã ấn: " .. name)
+                
+                task.wait(0.1) -- Nghỉ 1 nhịp siêu nhỏ giữa các nút khác nhau
+            end
+        end
+    end
+end
+
+local function setupListeners()
+    for name, path in pairs(buttonPaths) do
+        local button = findButtonByPath(path)
+        if button then
+            if not button:GetAttribute("AutoClickConnected") then
+                -- CHỈ lắng nghe sự kiện Visible (Ẩn/Hiện), gỡ bỏ .Changed để chống lag
+                button:GetPropertyChangedSignal("Visible"):Connect(checkAndClickAll)
+                button:SetAttribute("AutoClickConnected", true)
+            end
+        end
+    end
+end
+
+task.spawn(setupListeners)
+
+playerGui.DescendantAdded:Connect(function(descendant)
+    for name, path in pairs(buttonPaths) do
+        local lastName = string.match(path, "[^.]+$")
+        if descendant.Name == lastName then
+            task.wait(0.1)
+            setupListeners()
+            checkAndClickAll()
+            break
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.5) do
+        checkAndClickAll()
+    end
+end)
+
+print("[Auto Farm] Đã nạp chống lag (Cooldown). Script sẵn sàng!")
