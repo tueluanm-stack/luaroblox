@@ -1,0 +1,775 @@
+-- =============================================================================
+-- [ PHẦN CẤU HÌNH MENU - BẠN CHỈ CẦN CHỈNH SỬA TẠI ĐÂY ]
+-- =============================================================================
+local MenuTitle = "MENU PRO BY GEMINI" -- Tên hiển thị trên thanh Menu
+
+local MenuConfig = {
+    {
+        Name = "Kích Hoạt Nhảy Cao", -- Tên nút 1
+        Script = function()
+            game.Players.LocalPlayer.Character.Humanoid.JumpPower = 150
+            print("Đã bật Nhảy Cao!")
+        end
+    },
+    {
+        Name = "Kích Hoạt Chạy Nhanh", -- Tên nút 2
+        Script = function()
+            game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = 100
+            print("Đã bật Chạy Nhanh!")
+        end
+    },
+    {
+        Name = "Nhận Bản Đồ / Tool", -- Tên nút 3
+        Script = function()
+            -- Cho phép chạy script dạng loadstring từ bên ngoài
+            -- loadstring(game:HttpGet("https://raw.githubusercontent.com/..."))()
+            print("Đã chạy script bên thứ ba thành công!")
+        end
+    },
+    {
+        Name = "Nút Poine Băng",
+        Script = function()
+             -- ==========================================
+-- TELEPORT CYCLE SYSTEM
+-- CLICK -> TELEPORT -> NEXT POINT
+-- ==========================================
+
+local PATH_POSITIONS = {
+
+    Vector3.new(-55.39, 202.12, -48.71), -- Point 1
+    Vector3.new(86.31, 202.12, -35.57), -- Point 2
+    Vector3.new(-35.48, 202.12, -10.70), -- Point 3
+    Vector3.new(67.23, 202.18, -10.35), -- Point 4
+    Vector3.new(18.54, 202.12, -50.85), -- Point 5
+    Vector3.new(13.40, 202.12, -44.00), -- Point 6
+    Vector3.new(17.40, 202.12, -44.00), -- Point 7
+    Vector3.new(22.40, 202.12, -44.00), -- Point 8
+    Vector3.new(17.40, 202.12, -40.00), -- Point 9
+    Vector3.new(85.89, 202.12, -60.25), -- Point 10
+    Vector3.new(65.89, 202.12, -60.25), -- Point 11
+    Vector3.new(65.01, 202.12, -38.78), -- Point 12
+}
+
+-- Góc nhìn chung cho mọi điểm
+local CAMERA_LOOK = Vector3.new(0.00, -0.98, -0.17)
+
+-- ==========================================
+-- GUI SETTINGS
+-- ==========================================
+
+local BUTTON_COLOR = Color3.fromRGB(255, 85, 85)
+
+local BUTTON_SIZE = UDim2.new(0, 105, 0, 40)
+
+local BUTTON_POSITION = UDim2.new(0.05, 0, 0.4, 0)
+
+-- ==========================================
+-- SERVICES
+-- ==========================================
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- ==========================================
+-- REMOVE OLD GUI
+-- ==========================================
+
+pcall(function()
+    if PlayerGui:FindFirstChild("TeleportCycleGui") then
+        PlayerGui.TeleportCycleGui:Destroy()
+    end
+end)
+
+-- ==========================================
+-- CREATE GUI
+-- ==========================================
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "TeleportCycleGui"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = PlayerGui
+
+local TeleportButton = Instance.new("TextButton")
+TeleportButton.Name = "CycleButton"
+
+TeleportButton.Size = BUTTON_SIZE
+TeleportButton.Position = BUTTON_POSITION
+
+TeleportButton.BackgroundColor3 = BUTTON_COLOR
+TeleportButton.BorderSizePixel = 0
+
+TeleportButton.TextColor3 = Color3.fromRGB(255,255,255)
+
+TeleportButton.Font = Enum.Font.SourceSansBold
+TeleportButton.TextSize = 16
+
+TeleportButton.Active = true
+TeleportButton.Draggable = true
+TeleportButton.AutoButtonColor = true
+
+TeleportButton.Parent = ScreenGui
+
+-- Góc bo tròn
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 10)
+UICorner.Parent = TeleportButton
+
+-- Viền
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Thickness = 1.5
+UIStroke.Color = Color3.fromRGB(255,255,255)
+UIStroke.Parent = TeleportButton
+
+-- ==========================================
+-- SYSTEM
+-- ==========================================
+
+local currentPoint = 1
+local isTeleporting = false
+
+-- Update text nút
+local function updateButtonText()
+    TeleportButton.Text = "Point " .. tostring(currentPoint)
+end
+
+updateButtonText()
+
+-- ==========================================
+-- TELEPORT FUNCTION
+-- ==========================================
+
+local function teleportToNextPoint()
+
+    if isTeleporting then
+        return
+    end
+
+    isTeleporting = true
+
+    local character = LocalPlayer.Character
+
+    if not character then
+        isTeleporting = false
+        return
+    end
+
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+
+    local camera = Workspace.CurrentCamera
+
+    if humanoidRootPart and camera then
+
+        -- Lấy vị trí hiện tại
+        local targetPosition = PATH_POSITIONS[currentPoint]
+
+        -- Dịch chuyển
+        humanoidRootPart.CFrame = CFrame.new(targetPosition)
+
+        -- Chờ ổn định
+        task.wait(0.05)
+
+        -- Khóa góc nhìn first person
+        LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+
+        -- Ép góc nhìn camera
+        local camPos = camera.CFrame.Position
+
+        camera.CFrame = CFrame.lookAt(
+            camPos,
+            camPos + CAMERA_LOOK
+        )
+
+        -- Chuyển sang điểm tiếp theo
+        currentPoint += 1
+
+        -- Quay vòng lại point 1
+        if currentPoint > #PATH_POSITIONS then
+            currentPoint = 1
+        end
+
+        -- Update text
+        updateButtonText()
+    end
+
+    isTeleporting = false
+end
+
+-- ==========================================
+-- BUTTON CLICK
+-- ==========================================
+
+TeleportButton.MouseButton1Click:Connect(function()
+
+    teleportToNextPoint()
+
+end)
+
+-- ==========================================
+-- CHARACTER RESPAWN SUPPORT
+-- ==========================================
+
+LocalPlayer.CharacterAdded:Connect(function()
+
+    task.wait(1)
+
+    LocalPlayer.CameraMode = Enum.CameraMode.Classic
+
+end)
+            print("Script 4 hoạt động!")
+        end
+    },
+    {
+        Name = "Nút Update 12",
+        Script = function()
+             -- Khai báo hệ thống
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+local isAutoUpgrading = false
+
+----------------------------------------------------------------
+-- 1. TẠO GIAO DIỆN
+----------------------------------------------------------------
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AbsoluteUpgradeGui"
+
+pcall(function()
+    screenGui.Parent = CoreGui
+end)
+
+if not screenGui.Parent then
+    screenGui.Parent = playerGui
+end
+
+local mainButton = Instance.new("TextButton")
+mainButton.Size = UDim2.new(0, 140, 0, 45)
+mainButton.Position = UDim2.new(0.1, 0, 0.4, 0)
+mainButton.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+mainButton.Text = "Auto 1-12: OFF" -- Đã sửa thành 1-12
+mainButton.TextColor3 = Color3.fromRGB(255,255,255)
+mainButton.Font = Enum.Font.GothamBold
+mainButton.TextSize = 13
+mainButton.Active = true
+mainButton.Parent = screenGui
+
+----------------------------------------------------------------
+-- FIX DRAG CHUẨN
+----------------------------------------------------------------
+
+local dragging = false
+local dragInput = nil
+local dragStart = nil
+local startPos = nil
+
+local function updateDrag(input)
+    local delta = input.Position - dragStart
+
+    mainButton.Position = UDim2.new(
+        startPos.X.Scale,
+        startPos.X.Offset + delta.X,
+        startPos.Y.Scale,
+        startPos.Y.Offset + delta.Y
+    )
+end
+
+mainButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragging = true
+        dragInput = input
+        dragStart = input.Position
+        startPos = mainButton.Position
+
+        -- Theo dõi khi thả tay
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+                dragInput = nil
+            end
+        end)
+    end
+end)
+
+mainButton.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+    or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input == dragInput then
+        updateDrag(input)
+    end
+end)
+
+----------------------------------------------------------------
+-- 2. LOGIC NÂNG CẤP (1-12)
+----------------------------------------------------------------
+
+local function forceClick(button)
+    if button then
+        pcall(function()
+            for _, connection in pairs(getconnections(button.MouseButton1Click)) do
+                connection:Fire()
+            end
+
+            for _, connection in pairs(getconnections(button.MouseButton1Down)) do
+                connection:Fire()
+            end
+
+            for _, connection in pairs(getconnections(button.Activated)) do
+                connection:Fire()
+            end
+        end)
+    end
+end
+
+local function getUpgradeButton(towerIndex)
+    local targetPath = {
+        "MainHud",
+        "Menus",
+        "TeamManager",
+        "Menu",
+        "Towers",
+        "Listings",
+        tostring(towerIndex),
+        "UpgradeButtons",
+        "Upgrade"
+    }
+
+    local current = playerGui
+
+    for _, name in ipairs(targetPath) do
+        if current then
+            current = current:FindFirstChild(name)
+        else
+            return nil
+        end
+    end
+
+    return current
+end
+
+task.spawn(function()
+    while true do
+        if isAutoUpgrading then
+            for i = 1, 12 do -- Đã sửa vòng lặp lên 12
+                if isAutoUpgrading then
+                    local upgradeBtn = getUpgradeButton(i)
+
+                    if upgradeBtn then
+                        forceClick(upgradeBtn)
+                    end
+
+                    task.wait(0.3)
+                end
+            end
+        else
+            task.wait(0.5)
+        end
+    end
+end)
+
+----------------------------------------------------------------
+-- 3. BẬT / TẮT
+----------------------------------------------------------------
+
+mainButton.MouseButton1Click:Connect(function()
+    if dragging then
+        return
+    end
+
+    isAutoUpgrading = not isAutoUpgrading
+
+    if isAutoUpgrading then
+        mainButton.BackgroundColor3 = Color3.fromRGB(46,204,113)
+        mainButton.Text = "Auto 1-12: ON" -- Đã sửa thành 1-12
+    else
+        mainButton.BackgroundColor3 = Color3.fromRGB(231,76,60)
+        mainButton.Text = "Auto 1-12: OFF" -- Đã sửa thành 1-12
+    end
+end)
+
+print("Fixed drag bug hoàn toàn và đã nâng cấp từ 1-12!")
+
+            print("Script 5 hoạt động!")
+        end
+    },
+    {
+        Name = "Nút Update 6",
+        Script = function()
+             -- Khai báo hệ thống
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+local isAutoUpgrading = false
+
+----------------------------------------------------------------
+-- 1. TẠO GIAO DIỆN
+----------------------------------------------------------------
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AbsoluteUpgradeGui"
+
+pcall(function()
+    screenGui.Parent = CoreGui
+end)
+
+if not screenGui.Parent then
+    screenGui.Parent = playerGui
+end
+
+local mainButton = Instance.new("TextButton")
+mainButton.Size = UDim2.new(0, 140, 0, 45)
+mainButton.Position = UDim2.new(0.1, 0, 0.4, 0)
+mainButton.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+mainButton.Text = "Auto 1-6: OFF"
+mainButton.TextColor3 = Color3.fromRGB(255,255,255)
+mainButton.Font = Enum.Font.GothamBold
+mainButton.TextSize = 13
+mainButton.Active = true
+mainButton.Parent = screenGui
+
+----------------------------------------------------------------
+-- FIX DRAG CHUẨN
+----------------------------------------------------------------
+
+local dragging = false
+local dragInput = nil
+local dragStart = nil
+local startPos = nil
+
+local function updateDrag(input)
+    local delta = input.Position - dragStart
+
+    mainButton.Position = UDim2.new(
+        startPos.X.Scale,
+        startPos.X.Offset + delta.X,
+        startPos.Y.Scale,
+        startPos.Y.Offset + delta.Y
+    )
+end
+
+mainButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragging = true
+        dragInput = input
+        dragStart = input.Position
+        startPos = mainButton.Position
+
+        -- Theo dõi khi thả tay
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+                dragInput = nil
+            end
+        end)
+    end
+end)
+
+mainButton.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+    or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input == dragInput then
+        updateDrag(input)
+    end
+end)
+
+----------------------------------------------------------------
+-- 2. LOGIC NÂNG CẤP (1-6)
+----------------------------------------------------------------
+
+local function forceClick(button)
+    if button then
+        pcall(function()
+            for _, connection in pairs(getconnections(button.MouseButton1Click)) do
+                connection:Fire()
+            end
+
+            for _, connection in pairs(getconnections(button.MouseButton1Down)) do
+                connection:Fire()
+            end
+
+            for _, connection in pairs(getconnections(button.Activated)) do
+                connection:Fire()
+            end
+        end)
+    end
+end
+
+local function getUpgradeButton(towerIndex)
+    local targetPath = {
+        "MainHud",
+        "Menus",
+        "TeamManager",
+        "Menu",
+        "Towers",
+        "Listings",
+        tostring(towerIndex),
+        "UpgradeButtons",
+        "Upgrade"
+    }
+
+    local current = playerGui
+
+    for _, name in ipairs(targetPath) do
+        if current then
+            current = current:FindFirstChild(name)
+        else
+            return nil
+        end
+    end
+
+    return current
+end
+
+task.spawn(function()
+    while true do
+        if isAutoUpgrading then
+            for i = 1,6 do
+                if isAutoUpgrading then
+                    local upgradeBtn = getUpgradeButton(i)
+
+                    if upgradeBtn then
+                        forceClick(upgradeBtn)
+                    end
+
+                    task.wait(0.3)
+                end
+            end
+        else
+            task.wait(0.5)
+        end
+    end
+end)
+
+----------------------------------------------------------------
+-- 3. BẬT / TẮT
+----------------------------------------------------------------
+
+mainButton.MouseButton1Click:Connect(function()
+    if dragging then
+        return
+    end
+
+    isAutoUpgrading = not isAutoUpgrading
+
+    if isAutoUpgrading then
+        mainButton.BackgroundColor3 = Color3.fromRGB(46,204,113)
+        mainButton.Text = "Auto 1-6: ON"
+    else
+        mainButton.BackgroundColor3 = Color3.fromRGB(231,76,60)
+        mainButton.Text = "Auto 1-6: OFF"
+    end
+end)
+
+print("Fixed drag bug hoàn toàn!")
+            print("Script 6 hoạt động!")
+        end
+    },
+    {
+        Name = "Nút 4 Tổ Hợp",
+        Script = function()
+             loadstring(game:HttpGet("https://raw.githubusercontent.com/tueluanm-stack/luaroblox/refs/heads/main/thehouse4"))()
+            print("Script 4 hoạt động!")
+        end
+    },
+    {
+        Name = "Nút AFK",
+        Script = function()
+             loadstring(game:HttpGet("https://raw.githubusercontent.com/tueluanm-stack/luaroblox/refs/heads/main/Players.LocalPlayer.AntiAfk"))()
+            print("Script 5 hoạt động!")
+        end
+    },
+    {
+        Name = "Nút Thử Nghiệm 9",
+        Script = function()
+            print("Script 6 hoạt động!")
+        end
+    },
+    -- Bạn có thể Copy thêm các hàng tương tự như trên xuống dưới này để tạo thêm nút, danh sách sẽ tự cuộn dài ra!
+}
+
+-- =============================================================================
+-- [ HỆ THỐNG TẠO GIAO DIỆN (GUI ENGINE) - KHÔNG NÊN SỬA NẾU KHÔNG BIẾT VỀ GUI ]
+-- =============================================================================
+
+local UIS = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+-- Xác định nơi chứa GUI để tránh bị reset khi nhân vật chết
+local TargetParent = CoreGui or LocalPlayer:WaitForChild("PlayerGui")
+
+-- Xóa Menu cũ nếu đã tồn tại trước đó để tránh lỗi lặp giao diện
+if TargetParent:FindFirstChild("Gemini_CustomMenu") then
+    TargetParent["Gemini_CustomMenu"]:Destroy()
+end
+
+-- Tạo ScreenGui gốc
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "Gemini_CustomMenu"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = TargetParent
+
+-- Khung chính (Main Frame)
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 320, 0, 380)
+MainFrame.Position = UDim2.new(0.5, -160, 0.5, -190)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 10)
+MainCorner.Parent = MainFrame
+
+-- Thanh Tiêu Đề (Dùng để nắm kéo Menu)
+local TitleBar = Instance.new("TextLabel")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, -50, 0, 45)
+TitleBar.Position = UDim2.new(0, 15, 0, 0)
+TitleBar.BackgroundTransparency = 1
+TitleBar.Text = MenuTitle
+TitleBar.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleBar.TextSize = 16
+TitleBar.Font = Enum.Font.SourceSansBold
+TitleBar.TextXAlignment = Enum.TextXAlignment.Left
+TitleBar.Parent = MainFrame
+
+-- Nút Tắt Hoàn Toàn (Nút X)
+local CloseButton = Instance.new("TextButton")
+CloseButton.Name = "CloseButton"
+CloseButton.Size = UDim2.new(0, 30, 0, 30)
+CloseButton.Position = UDim2.new(1, -40, 0, 7)
+CloseButton.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+CloseButton.Text = "×"
+CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseButton.TextSize = 22
+CloseButton.Font = Enum.Font.SourceSansBold
+CloseButton.Parent = MainFrame
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 6)
+CloseCorner.Parent = CloseButton
+
+-- Logic tắt hoàn toàn Script
+CloseButton.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
+
+-- Vùng cuộn danh sách nút (Scrolling Frame)
+local ScrollFrame = Instance.new("ScrollingFrame")
+ScrollFrame.Name = "ScrollFrame"
+ScrollFrame.Size = UDim2.new(1, -20, 1, -65)
+ScrollFrame.Position = UDim2.new(0, 10, 0, 50)
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.BorderSizePixel = 0
+ScrollFrame.ScrollBarThickness = 5
+ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 100)
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+ScrollFrame.AutomaticCanvasSize = Enum.AutomaticCanvasSize.Y -- Tự động kéo dài khi có nhiều nút
+ScrollFrame.Parent = MainFrame
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 8) -- Khoảng cách giữa các nút
+UIListLayout.Parent = ScrollFrame
+
+-- Tạo các nút tự động dựa trên cấu hình ở trên
+for index, config in ipairs(MenuConfig) do
+    local Button = Instance.new("TextButton")
+    Button.Name = "ScriptButton_" .. index
+    Button.Size = UDim2.new(1, -10, 0, 42) -- Tự fit vừa khít chiều rộng của thanh cuộn
+    Button.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    Button.Text = config.Name
+    Button.TextColor3 = Color3.fromRGB(230, 230, 230)
+    Button.TextSize = 14
+    Button.Font = Enum.Font.SourceSansSemibold
+    Button.Parent = ScrollFrame
+
+    local ButtonCorner = Instance.new("UICorner")
+    ButtonCorner.CornerRadius = UDim.new(0, 6)
+    ButtonCorner.Parent = Button
+
+    -- Biến kiểm tra trạng thái khóa nút chống click trùng
+    local isClicked = false
+
+    Button.MouseButton1Click:Connect(function()
+        if not isClicked then
+            isClicked = true -- Khóa trạng thái lại ngay lập tức
+            
+            -- Thay đổi giao diện nút để báo hiệu đã bị khóa
+            Button.BackgroundColor3 = Color3.fromRGB(20, 50, 30) -- Đổi sang màu xanh tối hoặc xám tùy ý
+            Button.Text = "[Đã Bật] " .. config.Name
+            Button.TextColor3 = Color3.fromRGB(140, 140, 140)
+            
+            -- Thực thi script của nút đó một cách an toàn (không làm sập menu nếu code nút bị lỗi)
+            task.spawn(function()
+                local success, err = pcall(config.Script)
+                if not success then
+                    warn("Lỗi khi chạy nút " .. config.Name .. ": " .. tostring(err))
+                end
+            end)
+        end
+    end)
+end
+
+-- =============================================================================
+-- [ HỆ THỐNG KÉO THẢ GIAO DIỆN (DRAG SYSTEM) ]
+-- =============================================================================
+local dragToggle = nil
+local dragSpeed = 0.1
+local dragStart = nil
+local startPos = nil
+
+local function updateInput(input)
+    local delta = input.Position - dragStart
+    local position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    game:GetService("TweenService"):Create(MainFrame, TweenInfo.new(dragSpeed), {Position = position}):Play()
+end
+
+MainFrame.InputBegan:Connect(function(input)
+    if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and UIS:GetFocusedTextBox() == nil then
+        dragToggle = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragToggle = false
+            end
+        end)
+    end
+end)
+
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        if dragToggle then
+            updateInput(input)
+        end
+    end
+end)
