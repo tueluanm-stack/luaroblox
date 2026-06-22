@@ -1,0 +1,554 @@
+-- ============================================================
+-- FULL MACRO v2.0 – TOWER DEFENSE AUTO FARM
+-- Kết hợp: đặt.txt + nâng.txt + 4 tổ hợp.txt
+-- Cải tiến v2.0:
+--   • PHASE 5-6: đặt unit có RETRY (tự thử lại nếu hụt)
+--   • PHASE 8: chờ PlayAgain VÔ HẠN (không bao giờ tự tắt)
+--   • PHASE 3: 31 giây nâng cấp + nghỉ 4 giây
+--   • PHASE 7: 90 giây nâng cấp
+--   • Tối ưu timing cho mượt và ổn định hơn
+-- ============================================================
+
+local Players             = game:GetService("Players")
+local CoreGui             = game:GetService("CoreGui")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService          = game:GetService("GuiService")
+
+local localPlayer = Players.LocalPlayer
+local playerGui   = localPlayer:WaitForChild("PlayerGui")
+
+-- ============================================================
+-- [A] CẤU HÌNH
+-- ============================================================
+local OFFSET_X    = 0
+local OFFSET_Y    = 130
+local CAMERA_LOOK = Vector3.new(0.00, -0.98, -0.17)
+local STEP_DELAY  = 0.5  -- Khoảng nghỉ chuẩn giữa các bước trong deploy
+
+local PATH_POSITIONS = {
+    Vector3.new(-55.39, 202.12, -48.71), -- [1]
+    Vector3.new(86.31,  202.12, -35.57), -- [2]
+    Vector3.new(-35.48, 202.12, -15.70), -- [3]
+    Vector3.new(67.23,  202.18, -15.35), -- [4]
+    Vector3.new(18.54,  202.12, -50.85), -- [5]
+    Vector3.new(13.40,  202.12, -44.00), -- [6]
+    Vector3.new(17.40,  202.12, -44.00), -- [7]
+    Vector3.new(22.40,  202.12, -44.00), -- [8]
+    Vector3.new(17.40,  202.12, -40.00), -- [9]
+    Vector3.new(85.89,  202.12, -60.25), -- [10]
+    Vector3.new(65.89,  202.12, -60.25), -- [11]
+    Vector3.new(65.01,  202.12, -38.78), -- [12]
+}
+
+local PATHS = {
+    Play        = "MainHud.Elements.MapModeVote.MapsVoting.Elevator.Main.MenuList.RoomList.PlayButton",
+    Difficulty  = "MainHud.Elements.DifficultyVote.Listings.FlashList.1.Content.3.2.ListItem.Item.Content.ChooseButton",
+    StartGame   = "MainHud.Elements.StartGame.StartGameButton",
+    PlayAgain   = "MainHud.Menus.GameOver.Menu.OptionButtons.PlayAgain",
+    TeamBtn     = "MainHud.Elements.RightMenu.teamManagement",
+    CloseTeam   = "MainHud.Menus.TeamManager.Menu.Towers.CloseButton",
+    TeamMenu    = "MainHud.Menus.TeamManager.Menu",
+    PlaceBtn    = "MainHud.Elements.Hud.PlaceButton",
+    HotbarFrame = "MainHud.Elements.Hotbar.MainFrame",
+    Elements    = "MainHud.Elements",
+}
+
+-- ============================================================
+-- [B] XÓA GUI CŨ
+-- ============================================================
+for _, g in ipairs({CoreGui, playerGui}) do
+    local old = g:FindFirstChild("FullMacroGui")
+    if old then old:Destroy() end
+end
+
+-- ============================================================
+-- [C] XÂY DỰNG GUI
+-- ============================================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name         = "FullMacroGui"
+ScreenGui.ResetOnSpawn = false
+pcall(function() ScreenGui.Parent = CoreGui end)
+if not ScreenGui.Parent then ScreenGui.Parent = playerGui end
+
+-- Khung chính
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size             = UDim2.new(0, 255, 0, 135)
+MainFrame.Position         = UDim2.new(0.5, -127, 0.04, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 20)
+MainFrame.BorderSizePixel  = 0
+MainFrame.Active           = true
+MainFrame.Draggable        = true
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
+
+-- Tiêu đề
+local TitleBar = Instance.new("Frame", MainFrame)
+TitleBar.Size             = UDim2.new(1, 0, 0, 32)
+TitleBar.BackgroundColor3 = Color3.fromRGB(0, 115, 210)
+TitleBar.BorderSizePixel  = 0
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 10)
+
+local TitleLbl = Instance.new("TextLabel", TitleBar)
+TitleLbl.Size                 = UDim2.new(1, -12, 1, 0)
+TitleLbl.Position             = UDim2.new(0, 12, 0, 0)
+TitleLbl.BackgroundTransparency = 1
+TitleLbl.Text                 = "⚡ FULL MACRO v2.0"
+TitleLbl.TextColor3           = Color3.fromRGB(255, 255, 255)
+TitleLbl.Font                 = Enum.Font.GothamBold
+TitleLbl.TextSize             = 12
+TitleLbl.TextXAlignment       = Enum.TextXAlignment.Left
+
+-- Nhãn trạng thái
+local StatusLbl = Instance.new("TextLabel", MainFrame)
+StatusLbl.Size                 = UDim2.new(1, -10, 0, 18)
+StatusLbl.Position             = UDim2.new(0, 5, 0, 37)
+StatusLbl.BackgroundTransparency = 1
+StatusLbl.Text                 = "Trạng thái: Sẵn sàng"
+StatusLbl.TextColor3           = Color3.fromRGB(160, 220, 255)
+StatusLbl.Font                 = Enum.Font.Gotham
+StatusLbl.TextSize             = 10
+StatusLbl.TextXAlignment       = Enum.TextXAlignment.Left
+StatusLbl.TextTruncate         = Enum.TextTruncate.AtEnd
+
+-- Nút bắt đầu
+local StartBtn = Instance.new("TextButton", MainFrame)
+StartBtn.Size             = UDim2.new(1, -14, 0, 38)
+StartBtn.Position         = UDim2.new(0, 7, 0, 58)
+StartBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 220)
+StartBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+StartBtn.Font             = Enum.Font.GothamSemibold
+StartBtn.TextSize         = 12
+StartBtn.Text             = "🚀 BẮT ĐẦU MACRO"
+Instance.new("UICorner", StartBtn).CornerRadius = UDim.new(0, 7)
+
+-- Nút dừng
+local StopBtn = Instance.new("TextButton", MainFrame)
+StopBtn.Size             = UDim2.new(1, -14, 0, 24)
+StopBtn.Position         = UDim2.new(0, 7, 0, 101)
+StopBtn.BackgroundColor3 = Color3.fromRGB(175, 35, 35)
+StopBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+StopBtn.Font             = Enum.Font.Gotham
+StopBtn.TextSize         = 10
+StopBtn.Text             = "⏹ DỪNG MACRO"
+Instance.new("UICorner", StopBtn).CornerRadius = UDim.new(0, 6)
+
+-- ============================================================
+-- [D] STATE
+-- ============================================================
+local isRunning   = false
+local macroThread = nil
+
+local function setStatus(txt)
+    StatusLbl.Text = "Trạng thái: " .. txt
+    print("[Macro] " .. txt)
+end
+
+-- ============================================================
+-- [E] HÀM TIỆN ÍCH
+-- ============================================================
+
+-- Tìm node theo chuỗi "A.B.C" bắt đầu từ root
+local function findByPath(root, path)
+    local cur = root
+    for seg in string.gmatch(path, "[^.]+") do
+        if cur then cur = cur:FindFirstChild(seg) else return nil end
+    end
+    return cur
+end
+
+-- Kiểm tra GuiObject có visible trên toàn cây tới playerGui không
+local function isGloballyVisible(obj)
+    if not obj then return false end
+    local cur = obj
+    while cur and cur ~= playerGui do
+        if cur:IsA("GuiObject") and not cur.Visible then return false end
+        cur = cur.Parent
+    end
+    return true
+end
+
+-- Click kết hợp dùng cho nút menu/game flow (từ 4 tổ hợp.txt)
+local function safeClick(button)
+    if not (button and button.Visible) then return end
+    local oldSel = GuiService.SelectedObject
+    GuiService.SelectedObject = button
+    task.wait(0.01)
+
+    local clicked = false
+    pcall(function()
+        if getconnections then
+            for _, c in pairs(getconnections(button.MouseButton1Click)) do c:Fire(); clicked = true end
+            for _, c in pairs(getconnections(button.MouseButton1Down)) do c:Fire() end
+            for _, c in pairs(getconnections(button.Activated))        do c:Fire() end
+        end
+    end)
+    if not clicked then
+        pcall(function()
+            if button:IsA("TextButton") or button:IsA("ImageButton") then
+                button:SimulateClick()
+            end
+        end)
+    end
+    GuiService.SelectedObject = oldSel
+end
+
+-- Click VirtualInputManager + firesignal dùng cho ô tướng trên màn hình (từ đặt.txt)
+local function forceClickObject(guiObject)
+    if not guiObject then return end
+    local absPos  = guiObject.AbsolutePosition
+    local absSize = guiObject.AbsoluteSize
+    local fx = absPos.X + (absSize.X / 2) + OFFSET_X
+    local fy = absPos.Y + (absSize.Y / 2) + OFFSET_Y
+
+    pcall(function()
+        VirtualInputManager:SendMouseButtonEvent(fx, fy, 0, true,  game, 1)
+        task.wait(0.04)
+        VirtualInputManager:SendMouseButtonEvent(fx, fy, 0, false, game, 1)
+    end)
+    pcall(function()
+        if firesignal then
+            if guiObject:IsA("GuiButton") then
+                firesignal(guiObject.MouseButton1Down)
+                firesignal(guiObject.MouseButton1Click)
+                firesignal(guiObject.Activated)
+                firesignal(guiObject.MouseButton1Up)
+            end
+            local fDown = {UserInputType = Enum.UserInputType.MouseButton1, UserInputState = Enum.UserInputState.Begin}
+            local fUp   = {UserInputType = Enum.UserInputType.MouseButton1, UserInputState = Enum.UserInputState.End}
+            firesignal(guiObject.InputBegan, fDown)
+            task.wait(0.02)
+            firesignal(guiObject.InputEnded, fUp)
+        end
+    end)
+end
+
+-- ============================================================
+-- [F] HÀM ĐẶT TƯỚNG (từ đặt.txt – đã tối ưu)
+-- ============================================================
+-- Đặt 1 unit (1 lần thử). Trả về true nếu đặt thành công.
+local function deploySingleUnitOnce(unitName, targetPos)
+    if not isRunning then return false end
+
+    local mainHud = playerGui:FindFirstChild("MainHud")
+    if not mainHud then return false end
+    local elements  = mainHud:WaitForChild("Elements", 5)
+    local hotbar    = elements:WaitForChild("Hotbar", 5)
+    local mainframe = hotbar:WaitForChild("MainFrame", 5)
+    if not (elements and hotbar and mainframe) then return false end
+
+    -- Tìm slot (có thể đang ở mainframe hoặc bị kẹt ở elements từ lần trước)
+    local slot = mainframe:FindFirstChild(unitName) or elements:FindFirstChild(unitName)
+    if not slot then
+        warn("❌ Không tìm thấy slot: " .. unitName)
+        return false
+    end
+
+    -- B1: Đưa slot ra giữa màn hình để click được
+    slot.Parent      = elements
+    slot.AnchorPoint = Vector2.new(0.5, 0.5)
+    slot.Position    = UDim2.new(0.5, 0, 0.5, 0)
+    task.wait(STEP_DELAY)
+
+    -- B2: Teleport nhân vật + khoá camera nhìn xuống đất
+    local char = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local head = char and char:FindFirstChild("Head")
+
+    if root and head then
+        root.CFrame = CFrame.new(targetPos)
+        localPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+        task.wait(0.12)
+        local cam = workspace.CurrentCamera
+        if cam then
+            cam.CFrame = CFrame.lookAt(head.Position, head.Position + CAMERA_LOOK)
+        end
+    end
+    task.wait(STEP_DELAY)
+
+    -- B3: Click chọn slot tướng
+    forceClickObject(slot)
+    task.wait(STEP_DELAY)
+
+    -- B4: Click nút đặt (PlaceButton) – chờ nút sẵn sàng tối đa ~1s
+    local placeBtn
+    local pbDeadline = os.clock() + 1.0
+    repeat
+        placeBtn = findByPath(playerGui, "MainHud.Elements.Hud.PlaceButton")
+        if placeBtn and isGloballyVisible(placeBtn) then break end
+        task.wait(0.1)
+    until os.clock() >= pbDeadline
+
+    local placed = false
+    if placeBtn then
+        forceClickObject(placeBtn)
+        placed = true
+    else
+        warn("❌ Không tìm thấy PlaceButton (" .. unitName .. ")")
+    end
+
+    -- B5: Chờ game xử lý xong rồi hoàn nguyên slot + camera
+    task.wait(0.35)
+    if slot and slot.Parent == elements then
+        slot.Parent = mainframe
+    end
+    localPlayer.CameraMode = Enum.CameraMode.Classic
+    task.wait(STEP_DELAY)
+    return placed
+end
+
+-- Đặt unit có RETRY: tự thử lại tối đa maxTries lần nếu hụt
+local function deploySingleUnit(unitName, targetPos, maxTries)
+    maxTries = maxTries or 3
+    for attempt = 1, maxTries do
+        if not isRunning then return false end
+        local ok = deploySingleUnitOnce(unitName, targetPos)
+        if ok then
+            print(string.format("✅ Đặt Unit %s @ %s (lần %d)", unitName, tostring(targetPos), attempt))
+            return true
+        end
+        warn(string.format("⚠️ Hụt Unit %s (lần %d/%d) – thử lại...", unitName, attempt, maxTries))
+        task.wait(0.4)
+    end
+    warn("❌ Bỏ qua Unit " .. unitName .. " sau " .. maxTries .. " lần thử.")
+    return false
+end
+
+-- ============================================================
+-- [G] HÀM NÂNG CẤP (từ nâng.txt – đã tối ưu)
+-- ============================================================
+local function isTeamMenuOpen()
+    local menu = findByPath(playerGui, "MainHud.Menus.TeamManager.Menu")
+    return menu ~= nil and menu.Visible == true
+end
+
+local function toggleTeamMenu()
+    local btn = findByPath(playerGui, "MainHud.Elements.RightMenu.teamManagement")
+    if btn then safeClick(btn)
+    else warn("❌ Không tìm thấy nút teamManagement!") end
+end
+
+local function closeTeamMenu()
+    if not isTeamMenuOpen() then return end
+    local closeBtn = findByPath(playerGui, "MainHud.Menus.TeamManager.Menu.Towers.CloseButton")
+    if closeBtn then safeClick(closeBtn)
+    else toggleTeamMenu() end
+    task.wait(0.25)
+end
+
+-- Spam nâng cấp slot từ slotA đến slotB trong durationSec giây
+local function runUpgradeCycle(slotA, slotB, durationSec)
+    if not isRunning then return end
+    setStatus(string.format("Nâng cấp slot %d→%d / %ds...", slotA, slotB, durationSec))
+
+    -- Mở bảng nếu chưa mở
+    if not isTeamMenuOpen() then
+        toggleTeamMenu()
+        task.wait(0.5)
+    end
+
+    local deadline = os.clock() + durationSec
+    while isRunning and os.clock() < deadline do
+        -- Tự mở lại nếu game đóng ngầm
+        if not isTeamMenuOpen() then
+            toggleTeamMenu()
+            task.wait(0.25)
+        end
+        -- Quét và click nút Upgrade của từng slot
+        for i = slotA, slotB do
+            if not isRunning then break end
+            local upgradeBtn = findByPath(playerGui,
+                "MainHud.Menus.TeamManager.Menu.Towers.Listings." .. i .. ".UpgradeButtons.Upgrade"
+            )
+            if upgradeBtn then safeClick(upgradeBtn) end
+        end
+        task.wait(0.1) -- Nghỉ ngắn 100ms giữa các vòng quét
+    end
+
+    task.wait(0.3)
+    closeTeamMenu()
+    print(string.format("✅ Xong nâng cấp slot %d→%d!", slotA, slotB))
+end
+
+-- ============================================================
+-- [H] HÀM CHỜ VÀ CLICK NÚT GAME FLOW (từ 4 tổ hợp.txt)
+-- ============================================================
+local function waitAndClick(path, timeoutSec)
+    timeoutSec = timeoutSec or 90
+    local label = path:match("[^.]+$")  -- Lấy tên node cuối để log
+    setStatus("Chờ: " .. label .. "...")
+    local deadline = os.clock() + timeoutSec
+
+    while isRunning and os.clock() < deadline do
+        local btn = findByPath(playerGui, path)
+        if btn and isGloballyVisible(btn) then
+            task.wait(0.1)
+            safeClick(btn)
+            print("✅ Đã click: " .. label)
+            return true
+        end
+        task.wait(0.3)
+    end
+    warn("⚠️ Timeout khi chờ: " .. label)
+    return false
+end
+
+-- Chờ VÔ HẠN cho nút PlayAgain (không bao giờ tự tắt cho tới khi nó hiện
+-- hoặc người dùng bấm DỪNG). Tránh lỗi "chờ một lúc tự tắt" do timeout.
+local function waitForPlayAgain(path)
+    local label = path:match("[^.]+$")
+    local waited = 0
+    while isRunning do
+        local btn = findByPath(playerGui, path)
+        if btn and isGloballyVisible(btn) then
+            task.wait(0.2)
+            -- Click vài lần cho chắc ăn
+            for _ = 1, 3 do
+                if not isRunning then break end
+                safeClick(btn)
+                task.wait(0.25)
+                -- Nếu nút biến mất nghĩa là đã bấm thành công
+                if not (btn.Parent and isGloballyVisible(btn)) then break end
+            end
+            print("✅ Đã click: " .. label)
+            return true
+        end
+        task.wait(0.5)
+        waited = waited + 0.5
+        -- Cập nhật trạng thái mỗi 10s để biết macro vẫn đang sống
+        if waited % 10 < 0.5 then
+            setStatus(string.format("Chờ kết thúc game + PlayAgain... (%ds)", math.floor(waited)))
+        end
+    end
+    return false
+end
+
+-- ============================================================
+-- [I] VÒNG LẶP MACRO CHÍNH
+-- ============================================================
+local function runMacro()
+    local round = 0
+
+    while isRunning do
+        round = round + 1
+        setStatus("Vòng #" .. round .. " – Vào game...")
+
+        -- ──────────────────────────────────────────────────────
+        -- PHASE 0: TỰ ĐỘNG VÀO GAME
+        -- ──────────────────────────────────────────────────────
+        waitAndClick(PATHS.Play,       180) ; task.wait(0.7)
+        waitAndClick(PATHS.Difficulty, 90)  ; task.wait(0.7)
+
+        if not waitAndClick(PATHS.StartGame, 180) then
+            setStatus("Không bắt được StartGame, thử lại...")
+            task.wait(3)
+            continue
+        end
+        task.wait(2.0)  -- Đợi map load xong
+        if not isRunning then break end
+
+        -- ──────────────────────────────────────────────────────
+        -- PHASE 1: ĐẶT UNIT Ô 5 — ĐIỂM 1 & 2
+        -- ──────────────────────────────────────────────────────
+        setStatus("Đặt Unit 5 → [1] & [2]")
+        deploySingleUnit("5", PATH_POSITIONS[1])
+        deploySingleUnit("5", PATH_POSITIONS[2])
+
+        -- Nghỉ 5 giây sạc năng lượng
+        setStatus("Nghỉ 5 giây sạc năng lượng...")
+        task.wait(5)
+        if not isRunning then break end
+
+        -- ──────────────────────────────────────────────────────
+        -- PHASE 2: ĐẶT UNIT Ô 5 — ĐIỂM 3 & 4
+        -- (Ô 5 tự trả về Hotbar sau mỗi lần đặt)
+        -- ──────────────────────────────────────────────────────
+        setStatus("Đặt Unit 5 → [3] & [4]")
+        deploySingleUnit("5", PATH_POSITIONS[3])
+        deploySingleUnit("5", PATH_POSITIONS[4])
+        if not isRunning then break end
+
+        -- ──────────────────────────────────────────────────────
+        -- PHASE 3: NÂNG CẤP SLOT 1→4 / 31 GIÂY → ĐÓNG MENU → NGHỈ 4 GIÂY
+        -- ──────────────────────────────────────────────────────
+        runUpgradeCycle(1, 4, 31)
+        if not isRunning then break end
+        setStatus("Nghỉ 4 giây trước PHASE 4...")
+        task.wait(4)
+        if not isRunning then break end
+
+        -- ──────────────────────────────────────────────────────
+        -- PHASE 4: ĐẶT UNIT Ô 3 — ĐIỂM 5
+        -- ──────────────────────────────────────────────────────
+        setStatus("Đặt Unit 3 → [5]")
+        deploySingleUnit("3", PATH_POSITIONS[5])
+
+        -- Nghỉ 25 giây
+        setStatus("Nghỉ 25 giây sau điểm 5...")
+        task.wait(25)
+        if not isRunning then break end
+
+        -- ──────────────────────────────────────────────────────
+        -- PHASE 5: ĐẶT UNIT Ô 3 — ĐIỂM 6 → 9 (lần lượt)
+        -- ──────────────────────────────────────────────────────
+        setStatus("Đặt Unit 3 → [6] [7] [8] [9]")
+        deploySingleUnit("3", PATH_POSITIONS[6])
+        deploySingleUnit("3", PATH_POSITIONS[7])
+        deploySingleUnit("3", PATH_POSITIONS[8])
+        deploySingleUnit("3", PATH_POSITIONS[9])
+        if not isRunning then break end
+
+        -- ──────────────────────────────────────────────────────
+        -- PHASE 6: ĐẶT UNIT ĐẶC BIỆT — ĐIỂM 10 / 11 / 12
+        -- ──────────────────────────────────────────────────────
+        setStatus("Đặt Unit 2→[10]  1→[11]  4→[12]")
+        deploySingleUnit("2", PATH_POSITIONS[10])  -- ô 2 @ Point 10
+        deploySingleUnit("1", PATH_POSITIONS[11])  -- ô 1 @ Point 11
+        deploySingleUnit("4", PATH_POSITIONS[12])  -- ô 4 @ Point 12
+        if not isRunning then break end
+
+        -- ──────────────────────────────────────────────────────
+        -- PHASE 7: NÂNG CẤP SLOT 5→12 / 90 GIÂY → ĐÓNG MENU
+        -- ──────────────────────────────────────────────────────
+        runUpgradeCycle(5, 12, 90)
+        if not isRunning then break end
+
+        -- ──────────────────────────────────────────────────────
+        -- PHASE 8: CHỜ NÚT PLAYAGAIN → CLICK → LẶP LẠI
+        -- ──────────────────────────────────────────────────────
+        setStatus("Chờ kết thúc game + PlayAgain...")
+        waitForPlayAgain(PATHS.PlayAgain)  -- Chờ VÔ HẠN, không tự tắt
+        task.wait(1.5)  -- Nghỉ trước khi vào vòng tiếp theo
+    end
+
+    -- Dọn dẹp khi thoát
+    pcall(function() localPlayer.CameraMode = Enum.CameraMode.Classic end)
+    StartBtn.Text             = "🚀 BẮT ĐẦU MACRO"
+    StartBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 220)
+    setStatus("Đã dừng.")
+    isRunning = false
+end
+
+-- ============================================================
+-- [J] SỰ KIỆN NÚT
+-- ============================================================
+StartBtn.MouseButton1Click:Connect(function()
+    if isRunning then return end
+    isRunning = true
+    StartBtn.Text             = "⏳ ĐANG CHẠY..."
+    StartBtn.BackgroundColor3 = Color3.fromRGB(120, 95, 0)
+    macroThread = task.spawn(runMacro)
+end)
+
+StopBtn.MouseButton1Click:Connect(function()
+    isRunning = false
+    if macroThread then
+        pcall(function() task.cancel(macroThread) end)
+        macroThread = nil
+    end
+    pcall(function() localPlayer.CameraMode = Enum.CameraMode.Classic end)
+    StartBtn.Text             = "🚀 BẮT ĐẦU MACRO"
+    StartBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 220)
+    setStatus("Đã dừng thủ công.")
+    print("⏹ Macro đã dừng!")
+end)
+
+print("✅ Full Macro v2.0 đã tải xong! Nhấn 🚀 để bắt đầu.")
