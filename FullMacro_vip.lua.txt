@@ -1,0 +1,1810 @@
+-- ============================================================
+-- FULL MACRO v5.0 – BLOCK PROGRAMMING (kiểu Scratch)
+-- Bảng to: đóng / mở / thu nhỏ / kéo thả trên thanh tiêu đề
+-- Palette khối lệnh bên trái → xếp khối vào vùng chương trình bên phải
+-- Chạy từ TRÊN xuống DƯỚI. Nhấn "TẠO SCRIPT" → sinh menu kích hoạt riêng
+-- Mới ở v5.1:
+--   • Bỏ hẳn khối Vuốt & Click (cả trong Cài đặt)
+--   • Cài đặt độ lệch chuột: đưa Unit ô 1 ra GIỮA màn để canh chỉnh
+--     trực quan (marker đỏ = điểm chuột sẽ ấn) + nút Click thử.
+--     Tắt test → trả Unit ô 1 về thanh cũ. (Bố cục Cài đặt gọn lại)
+--   • Nút "SCRIPT GỐC" → sinh ra NGUYÊN MÃ Lua chạy độc lập: có sẵn
+--     menu KÍCH HOẠT / DỪNG / Trạng thái, chức năng GIỐNG 100% "Tạo Script".
+--     Dán thẳng vào executor là chạy được, không cần bảng ghép khối.
+-- ============================================================
+
+local Players             = game:GetService("Players")
+local CoreGui             = game:GetService("CoreGui")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService          = game:GetService("GuiService")
+local UserInputService    = game:GetService("UserInputService")
+local RunService          = game:GetService("RunService")
+
+local localPlayer = Players.LocalPlayer
+local playerGui   = localPlayer:WaitForChild("PlayerGui")
+
+-- ============================================================
+-- [A] CẤU HÌNH
+-- ============================================================
+-- Độ lệch chuột khi click VÀO GUI bằng VirtualInputManager (chỉnh trong Cài đặt)
+local OFFSET_X    = 38
+local OFFSET_Y    = 130
+local CAMERA_LOOK = Vector3.new(0.00, -0.98, -0.17) -- Góc nhìn mặc định
+local STEP_DELAY  = 0.5
+
+-- Unit dùng để TEST độ lệch (đưa ra giữa màn). Mặc định ô "1".
+local OFFSET_TEST_SLOT = "1"
+
+-- Vị trí mặc định (A, B) – người dùng có thể thêm bằng nút "+ Lấy vị trí"
+local DEFAULT_POSITIONS = {
+    Vector3.new(0,   100, 0),
+    Vector3.new(100, 0,   100),
+}
+
+local PATHS = {
+    Play      = "MainHud.Elements.MapModeVote.MapsVoting.Elevator.Main.MenuList.RoomList.PlayButton",
+    StartGame = "MainHud.Elements.StartGame.StartGameButton",
+    PlayAgain = "MainHud.Menus.GameOver.Menu.OptionButtons.PlayAgain",
+    TeamBtn   = "MainHud.Elements.RightMenu.teamManagement",
+    TeamMenu  = "MainHud.Menus.TeamManager.Menu",
+    CloseTeam = "MainHud.Menus.TeamManager.Menu.Towers.CloseButton",
+}
+
+-- Đường dẫn 5 mức độ khó
+local DIFFICULTY_PATHS = {
+    [1] = "MainHud.Elements.DifficultyVote.Listings.FlashList.1.Content.1.2.ListItem.Item.Content.ChooseButton",
+    [2] = "MainHud.Elements.DifficultyVote.Listings.FlashList.1.Content.2.2.ListItem.Item.Content.ChooseButton",
+    [3] = "MainHud.Elements.DifficultyVote.Listings.FlashList.1.Content.3.2.ListItem.Item.Content.ChooseButton",
+    [4] = "MainHud.Elements.DifficultyVote.Listings.FlashList.1.Content.4.2.ListItem.Item.Content.ChooseButton",
+    [5] = "MainHud.Elements.DifficultyVote.Listings.FlashList.1.Content.5.2.ListItem.Item.Content.ChooseButton",
+}
+local DIFFICULTY_NAMES = { [1]="Dễ", [2]="Trung bình", [3]="Khó", [4]="Ác mộng", [5]="Địa ngục" }
+
+-- ============================================================
+-- [B] BẢNG MÀU (theme tối, nâng cấp đẹp hơn)
+-- ============================================================
+local C = {
+    bg      = Color3.fromRGB(15, 16, 26),
+    panel   = Color3.fromRGB(25, 27, 42),
+    panel2  = Color3.fromRGB(38, 41, 60),
+    title   = Color3.fromRGB(0, 122, 224),
+    text    = Color3.fromRGB(240, 244, 255),
+    muted   = Color3.fromRGB(150, 160, 185),
+    green   = Color3.fromRGB(40, 175, 100),
+    red     = Color3.fromRGB(210, 65, 65),
+    amber   = Color3.fromRGB(228, 150, 40), -- điều khiển (chờ)
+    blue    = Color3.fromRGB(58, 130, 235), -- di chuyển
+    teal    = Color3.fromRGB(0, 162, 172),  -- game flow
+}
+
+-- ============================================================
+-- [C] TIỆN ÍCH TẠO GUI
+-- ============================================================
+local function new(class, props, parent)
+    local o = Instance.new(class)
+    for k, v in pairs(props or {}) do o[k] = v end
+    if parent then o.Parent = parent end
+    return o
+end
+local function corner(obj, r) new("UICorner", {CornerRadius = UDim.new(0, r or 8)}, obj) end
+local function stroke(obj, col, th)
+    new("UIStroke", { Color = col or C.panel2, Thickness = th or 1,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, obj)
+end
+local function pad(obj, p)
+    new("UIPadding", {
+        PaddingLeft   = UDim.new(0, p), PaddingRight = UDim.new(0, p),
+        PaddingTop    = UDim.new(0, p), PaddingBottom = UDim.new(0, p),
+    }, obj)
+end
+
+-- Cho phép kéo thả 1 frame bằng cách giữ trên handle
+local function makeDraggable(frame, handle)
+    local dragging, dragStart, startPos = false, nil, nil
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true
+            dragStart = input.Position
+            startPos  = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - dragStart
+            frame.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + d.X,
+                startPos.Y.Scale, startPos.Y.Offset + d.Y
+            )
+        end
+    end)
+end
+
+-- Chỉ số → chữ cái: 1=A, 2=B, ... 27=AA
+local function indexToLetter(i)
+    local s = ""
+    while i > 0 do
+        local r = (i - 1) % 26
+        s = string.char(65 + r) .. s
+        i = math.floor((i - 1) / 26)
+    end
+    return s
+end
+
+-- Copy text ra clipboard (đa số executor hỗ trợ 1 trong các hàm sau)
+local function copyToClipboard(t)
+    local fn = (setclipboard or toclipboard or writeclipboard
+        or (syn and syn.write_clipboard) or (Clipboard and Clipboard.set))
+    if fn then
+        local ok = pcall(fn, t)
+        return ok
+    end
+    return false
+end
+
+-- ============================================================
+-- [D] XÓA GUI CŨ
+-- ============================================================
+for _, g in ipairs({CoreGui, playerGui}) do
+    for _, n in ipairs({"FullMacroGui", "FullMacroRunGui"}) do
+        local old = g:FindFirstChild(n)
+        if old then old:Destroy() end
+    end
+end
+
+-- ============================================================
+-- [E] HÀM TÌM / CLICK (giữ nguyên logic từ bản cũ)
+-- ============================================================
+local isRunning        = false
+local activeStatusLabel = nil
+
+local function setStatus(txt)
+    if activeStatusLabel then activeStatusLabel.Text = "Trạng thái: " .. txt end
+    print("[Macro] " .. txt)
+end
+
+local function findByPath(root, path)
+    local cur = root
+    for seg in string.gmatch(path, "[^.]+") do
+        if cur then cur = cur:FindFirstChild(seg) else return nil end
+    end
+    return cur
+end
+
+local function isGloballyVisible(obj)
+    if not obj then return false end
+    local cur = obj
+    while cur and cur ~= playerGui do
+        if cur:IsA("GuiObject") and not cur.Visible then return false end
+        cur = cur.Parent
+    end
+    return true
+end
+
+local function safeClick(button)
+    if not (button and button.Visible) then return end
+    local oldSel = GuiService.SelectedObject
+    GuiService.SelectedObject = button
+    task.wait(0.01)
+    local clicked = false
+    pcall(function()
+        if getconnections then
+            for _, c in pairs(getconnections(button.MouseButton1Click)) do c:Fire(); clicked = true end
+            for _, c in pairs(getconnections(button.MouseButton1Down)) do c:Fire() end
+            for _, c in pairs(getconnections(button.Activated))        do c:Fire() end
+        end
+    end)
+    if not clicked then
+        pcall(function()
+            if button:IsA("TextButton") or button:IsA("ImageButton") then button:SimulateClick() end
+        end)
+    end
+    GuiService.SelectedObject = oldSel
+end
+
+local function forceClickObject(guiObject)
+    if not guiObject then return end
+    local absPos  = guiObject.AbsolutePosition
+    local absSize = guiObject.AbsoluteSize
+    local fx = absPos.X + (absSize.X / 2) + OFFSET_X
+    local fy = absPos.Y + (absSize.Y / 2) + OFFSET_Y
+    pcall(function()
+        VirtualInputManager:SendMouseButtonEvent(fx, fy, 0, true,  game, 1)
+        task.wait(0.04)
+        VirtualInputManager:SendMouseButtonEvent(fx, fy, 0, false, game, 1)
+    end)
+    pcall(function()
+        if firesignal then
+            if guiObject:IsA("GuiButton") then
+                firesignal(guiObject.MouseButton1Down)
+                firesignal(guiObject.MouseButton1Click)
+                firesignal(guiObject.Activated)
+                firesignal(guiObject.MouseButton1Up)
+            end
+            local fDown = {UserInputType = Enum.UserInputType.MouseButton1, UserInputState = Enum.UserInputState.Begin}
+            local fUp   = {UserInputType = Enum.UserInputType.MouseButton1, UserInputState = Enum.UserInputState.End}
+            firesignal(guiObject.InputBegan, fDown)
+            task.wait(0.02)
+            firesignal(guiObject.InputEnded, fUp)
+        end
+    end)
+end
+
+-- Click chuột THẬT tại toạ độ x,y trên màn hình (speed = ms giữ chuột)
+local function clickScreen(x, y, speedMs)
+    local hold = math.max(0, (tonumber(speedMs) or 60)) / 1000
+    pcall(function()
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, true,  game, 1)
+        task.wait(hold)
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1)
+    end)
+end
+
+-- ============================================================
+-- [F] HÀNH ĐỘNG CƠ BẢN (dùng cho khối lệnh)
+-- ============================================================
+-- Tìm slot trong hotbar; trả về slot, elements, mainframe
+local function getHotbarSlot(slotName)
+    local mainHud = playerGui:FindFirstChild("MainHud")
+    if not mainHud then return nil end
+    local elements  = mainHud:FindFirstChild("Elements")
+    local hotbar    = elements and elements:FindFirstChild("Hotbar")
+    local mainframe = hotbar and hotbar:FindFirstChild("MainFrame")
+    if not (elements and mainframe) then return nil, elements, mainframe end
+    local slot = mainframe:FindFirstChild(slotName) or elements:FindFirstChild(slotName)
+    if not slot then
+        for _, c in ipairs(mainframe:GetChildren()) do
+            if c:IsA("GuiObject") then slot = c break end
+        end
+    end
+    return slot, elements, mainframe
+end
+
+-- Chỉ dịch chuyển bản th��n tới vị trí + khoá góc nhìn mặc định
+local function teleportSelf(pos)
+    local char = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local head = char and char:FindFirstChild("Head")
+    if root then
+        root.CFrame = CFrame.new(pos)
+        localPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+        task.wait(0.12)
+        local cam = workspace.CurrentCamera
+        if cam and head then
+            cam.CFrame = CFrame.lookAt(head.Position, head.Position + CAMERA_LOOK)
+        end
+    end
+end
+
+-- Đặt 1 unit tại vị trí (1 lần thử)
+local function deployUnitOnce(unitName, targetPos)
+    if not isRunning then return false end
+    local slot, elements, mainframe = getHotbarSlot(unitName)
+    if not (slot and elements and mainframe) then
+        warn("❌ Không tìm thấy slot: " .. unitName); return false
+    end
+
+    slot.Parent      = elements
+    slot.AnchorPoint = Vector2.new(0.5, 0.5)
+    slot.Position    = UDim2.new(0.5, 0, 0.5, 0)
+    task.wait(STEP_DELAY)
+
+    teleportSelf(targetPos)
+    task.wait(STEP_DELAY)
+
+    forceClickObject(slot)
+    task.wait(STEP_DELAY)
+
+    local placeBtn
+    local deadline = os.clock() + 1.0
+    repeat
+        placeBtn = findByPath(playerGui, "MainHud.Elements.Hud.PlaceButton")
+        if placeBtn and isGloballyVisible(placeBtn) then break end
+        task.wait(0.1)
+    until os.clock() >= deadline
+
+    local placed = false
+    if placeBtn then forceClickObject(placeBtn); placed = true
+    else warn("❌ Không tìm thấy PlaceButton (" .. unitName .. ")") end
+
+    task.wait(0.35)
+    if slot and slot.Parent == elements then slot.Parent = mainframe end
+    localPlayer.CameraMode = Enum.CameraMode.Classic
+    task.wait(STEP_DELAY)
+    return placed
+end
+
+-- Đặt unit có RETRY (tự thử lại nếu hụt)
+local function deployUnit(unitName, targetPos, maxTries)
+    maxTries = maxTries or 3
+    for attempt = 1, maxTries do
+        if not isRunning then return false end
+        if deployUnitOnce(unitName, targetPos) then
+            print(string.format("✅ Đặt Unit %s @ %s (lần %d)", unitName, tostring(targetPos), attempt))
+            return true
+        end
+        warn(string.format("⚠️ Hụt Unit %s (lần %d/%d)", unitName, attempt, maxTries))
+        task.wait(0.4)
+    end
+    return false
+end
+
+local function waitAndClick(path, timeoutSec)
+    timeoutSec = timeoutSec or 90
+    local label = path:match("[^.]+$")
+    setStatus("Chờ: " .. label .. "...")
+    local deadline = os.clock() + timeoutSec
+    while isRunning and os.clock() < deadline do
+        local btn = findByPath(playerGui, path)
+        if btn and isGloballyVisible(btn) then
+            task.wait(0.1)
+            safeClick(btn)
+            print("✅ Đã click: " .. label)
+            return true
+        end
+        task.wait(0.3)
+    end
+    warn("⚠️ Timeout khi chờ: " .. label)
+    return false
+end
+
+-- Chờ VÔ HẠN nút PlayAgain (không bao giờ tự tắt)
+local function waitForPlayAgain(path)
+    local label = path:match("[^.]+$")
+    local waited = 0
+    while isRunning do
+        local btn = findByPath(playerGui, path)
+        if btn and isGloballyVisible(btn) then
+            task.wait(0.2)
+            for _ = 1, 3 do
+                if not isRunning then break end
+                safeClick(btn)
+                task.wait(0.25)
+                if not (btn.Parent and isGloballyVisible(btn)) then break end
+            end
+            print("✅ Đã click: " .. label)
+            return true
+        end
+        task.wait(0.5)
+        waited = waited + 0.5
+        if waited % 10 < 0.5 then
+            setStatus(string.format("Chờ PlayAgain... (%ds)", math.floor(waited)))
+        end
+    end
+    return false
+end
+
+-- ── TEAM / UPGRADE ──
+local function isTeamMenuOpen()
+    local menu = findByPath(playerGui, PATHS.TeamMenu)
+    return menu ~= nil and menu.Visible == true
+end
+local function toggleTeamMenu()
+    local btn = findByPath(playerGui, PATHS.TeamBtn)
+    if btn then safeClick(btn) else warn("❌ Không tìm thấy nút Team!") end
+end
+local function closeTeamMenu()
+    if not isTeamMenuOpen() then return end
+    local closeBtn = findByPath(playerGui, PATHS.CloseTeam)
+    if closeBtn then safeClick(closeBtn) else toggleTeamMenu() end
+    task.wait(0.25)
+end
+
+-- Upgrade slot từ A→B trong durationSec; tự mở lại Team nếu bị đóng; xong tắt "X"
+local function runUpgradeCycle(slotA, slotB, durationSec)
+    if not isRunning then return end
+    slotA = math.max(1, math.floor(tonumber(slotA) or 1))
+    slotB = math.max(slotA, math.floor(tonumber(slotB) or slotA))
+    durationSec = tonumber(durationSec) or 30
+    setStatus(string.format("Upgrade slot %d→%d / %ds...", slotA, slotB, durationSec))
+
+    if not isTeamMenuOpen() then toggleTeamMenu(); task.wait(0.5) end
+
+    local deadline = os.clock() + durationSec
+    while isRunning and os.clock() < deadline do
+        if not isTeamMenuOpen() then toggleTeamMenu(); task.wait(0.25) end
+        for i = slotA, slotB do
+            if not isRunning then break end
+            local upgradeBtn = findByPath(playerGui,
+                "MainHud.Menus.TeamManager.Menu.Towers.Listings." .. i .. ".UpgradeButtons.Upgrade")
+            if upgradeBtn then safeClick(upgradeBtn) end
+        end
+        task.wait(0.1)
+    end
+    task.wait(0.3)
+    closeTeamMenu()
+    print(string.format("✅ Xong upgrade slot %d→%d!", slotA, slotB))
+end
+
+-- ============================================================
+-- [G] DỮ LIỆU CHƯƠNG TRÌNH
+-- ============================================================
+local positions   = {}  -- { {label="A", pos=Vector3}, ... }
+local scriptBlocks = {} -- { {type=..., ...}, ... }  (chạy từ trên xuống)
+
+for i, v in ipairs(DEFAULT_POSITIONS) do
+    positions[i] = { label = indexToLetter(i), pos = v }
+end
+
+-- Màu riêng cho nhóm khối
+C.purple = Color3.fromRGB(150, 90, 200) -- lặp lại
+C.orange = Color3.fromRGB(205, 110, 40) -- upgrade
+
+-- Định nghĩa khối lệnh: nhãn + màu + danh sách tham số (field)
+-- (Đã bỏ khối "click" và "swipe")
+local BLOCK_DEFS = {
+    wait       = { label = "⏱ Chờ đợi (ms)",        color = C.amber,  params = {"ms"} },
+    teleport   = { label = "🧍 Dịch chuyển → Vị trí", color = C.blue,   params = {"pos"} },
+    unit       = { label = "🎯 Đặt Unit",            color = C.green,  params = {"unit", "pos"} },
+    upgrade    = { label = "⬆ Upgrade đội",           color = C.orange, params = {"from", "to", "dur"} },
+    play       = { label = "🎮 Chơi (Play)",         color = C.teal,   params = {} },
+    startgame  = { label = "🚀 Bắt đầu game",        color = C.teal,   params = {} },
+    difficulty = { label = "⚙ Chọn độ khó",          color = C.teal,   params = {"level"} },
+    playagain  = { label = "🏳 Chơi lại",            color = C.teal,   params = {} },
+    loop       = { label = "🔁 Lặp lại từ đầu",       color = C.purple, params = {"count"} },
+}
+-- Thứ tự hiển thị trong palette
+local PALETTE_ORDER = {
+    "wait", "teleport", "unit", "upgrade",
+    "play", "startgame", "difficulty", "playagain", "loop",
+}
+
+local function defaultBlock(t)
+    if t == "wait"          then return { type = t, ms = 1000 }
+    elseif t == "teleport"  then return { type = t, posIndex = 1 }
+    elseif t == "unit"      then return { type = t, unit = "5", posIndex = 1 }
+    elseif t == "upgrade"   then return { type = t, from = 1, to = 4, dur = 31 }
+    elseif t == "difficulty" then return { type = t, level = 3 }
+    elseif t == "loop"      then return { type = t, count = 0 } -- 0 = vô hạn
+    else return { type = t } end
+end
+
+-- Mô tả 1 khối dễ đọc (dùng cho phần "Tạo Mã")
+local function describeBlock(b)
+    if b.type == "wait" then
+        return "⏱ Chờ " .. (tonumber(b.ms) or 0) .. " ms"
+    elseif b.type == "teleport" then
+        local p = positions[b.posIndex]
+        return "🧍 Dịch chuyển → " .. ((p and p.label) or "?")
+    elseif b.type == "unit" then
+        local p = positions[b.posIndex]
+        return "🎯 Đặt Unit ô " .. tostring(b.unit) .. " → " .. ((p and p.label) or "?")
+    elseif b.type == "upgrade" then
+        return string.format("⬆ Upgrade ô %s→%s trong %ss", tostring(b.from), tostring(b.to), tostring(b.dur))
+    elseif b.type == "play" then
+        return "🎮 Chơi (Play)"
+    elseif b.type == "startgame" then
+        return "🚀 Bắt đầu game"
+    elseif b.type == "difficulty" then
+        return "⚙ Chọn độ khó " .. tostring(b.level) .. ":" .. (DIFFICULTY_NAMES[b.level] or "")
+    elseif b.type == "playagain" then
+        return "🏳 Chơi lại"
+    elseif b.type == "loop" then
+        local c = tonumber(b.count) or 0
+        return "🔁 Lặp lại từ đầu " .. (c <= 0 and "(vô hạn)" or (c .. " lần"))
+    end
+    return b.type
+end
+
+-- ============================================================
+-- [H] EXECUTOR – chạy danh sách khối từ trên xuống
+-- ============================================================
+local function runOneBlock(b)
+    if b.type == "wait" then
+        local ms = tonumber(b.ms) or 0
+        setStatus("Chờ " .. ms .. " ms")
+        local left = ms / 1000
+        while isRunning and left > 0 do
+            local step = math.min(0.2, left)
+            task.wait(step)
+            left = left - step
+        end
+    elseif b.type == "teleport" then
+        local p = positions[b.posIndex]
+        if p then setStatus("Dịch chuyển → " .. p.label); teleportSelf(p.pos)
+                  localPlayer.CameraMode = Enum.CameraMode.Classic end
+    elseif b.type == "unit" then
+        local p = positions[b.posIndex]
+        if p then setStatus("Đặt Unit " .. b.unit .. " → " .. p.label)
+                  deployUnit(b.unit, p.pos, 3) end
+    elseif b.type == "upgrade" then
+        runUpgradeCycle(b.from, b.to, b.dur)
+    elseif b.type == "play" then
+        waitAndClick(PATHS.Play, 180); task.wait(0.6)
+    elseif b.type == "startgame" then
+        waitAndClick(PATHS.StartGame, 180); task.wait(0.6)
+    elseif b.type == "difficulty" then
+        local path = DIFFICULTY_PATHS[b.level]
+        if path then setStatus("Chọn độ khó " .. (DIFFICULTY_NAMES[b.level] or b.level))
+                     waitAndClick(path, 90); task.wait(0.6) end
+    elseif b.type == "playagain" then
+        waitForPlayAgain(PATHS.PlayAgain); task.wait(1.0)
+    end
+end
+
+-- Chạy theo chỉ số. Khối "loop" sẽ nhảy về đầu (vô hạn nếu count=0,
+-- hoặc lặp count lần rồi đi tiếp).
+local function runCompiledScript(blocks)
+    local loopCount = {} -- đếm số lần đã lặp tại mỗi khối loop
+    local i = 1
+    while isRunning and i <= #blocks do
+        local b = blocks[i]
+        if b.type == "loop" then
+            local target = tonumber(b.count) or 0
+            if target <= 0 then
+                setStatus("🔁 Lặp lại từ đầu (vô hạn)")
+                i = 1
+            else
+                loopCount[i] = (loopCount[i] or 0) + 1
+                if loopCount[i] < target then
+                    setStatus(string.format("🔁 Lặp %d/%d", loopCount[i], target))
+                    i = 1
+                else
+                    loopCount[i] = nil
+                    i = i + 1
+                end
+            end
+        else
+            runOneBlock(b)
+            i = i + 1
+        end
+    end
+    pcall(function() localPlayer.CameraMode = Enum.CameraMode.Classic end)
+end
+
+-- ============================================================
+-- [I] GUI BẢNG SOẠN THẢO (BLOCK EDITOR)
+-- ============================================================
+local ScreenGui = new("ScreenGui", { Name = "FullMacroGui", ResetOnSpawn = false })
+pcall(function() ScreenGui.Parent = CoreGui end)
+if not ScreenGui.Parent then ScreenGui.Parent = playerGui end
+
+local Main = new("Frame", {
+    Size = UDim2.new(0, 700, 0, 430),
+    Position = UDim2.new(0.5, -350, 0.5, -215),
+    BackgroundColor3 = C.bg, BorderSizePixel = 0,
+}, ScreenGui)
+corner(Main, 14)
+stroke(Main, C.panel2, 1)
+
+-- Thanh tiêu đề (kéo thả)
+local TitleBar = new("Frame", {
+    Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = C.title, BorderSizePixel = 0,
+}, Main)
+corner(TitleBar, 14)
+new("Frame", { -- che bo góc dưới của title
+    Size = UDim2.new(1, 0, 0, 14), Position = UDim2.new(0, 0, 1, -14),
+    BackgroundColor3 = C.title, BorderSizePixel = 0,
+}, TitleBar)
+new("TextLabel", {
+    Size = UDim2.new(1, -130, 1, 0), Position = UDim2.new(0, 14, 0, 0),
+    BackgroundTransparency = 1, Text = "🧩 FULL MACRO v5.0 – Block Editor",
+    TextColor3 = C.text, Font = Enum.Font.GothamBold, TextSize = 14,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, TitleBar)
+
+local SettingsBtn = new("TextButton", {
+    Size = UDim2.new(0, 30, 0, 24), Position = UDim2.new(1, -102, 0.5, -12),
+    BackgroundColor3 = C.panel2, Text = "⚙", TextColor3 = C.text,
+    Font = Enum.Font.GothamBold, TextSize = 16,
+}, TitleBar)
+corner(SettingsBtn, 6)
+
+local MinBtn = new("TextButton", {
+    Size = UDim2.new(0, 30, 0, 24), Position = UDim2.new(1, -68, 0.5, -12),
+    BackgroundColor3 = Color3.fromRGB(255, 190, 60), Text = "—",
+    TextColor3 = Color3.fromRGB(20,20,20), Font = Enum.Font.GothamBold, TextSize = 16,
+}, TitleBar)
+corner(MinBtn, 6)
+local CloseBtn = new("TextButton", {
+    Size = UDim2.new(0, 30, 0, 24), Position = UDim2.new(1, -34, 0.5, -12),
+    BackgroundColor3 = C.red, Text = "✕",
+    TextColor3 = C.text, Font = Enum.Font.GothamBold, TextSize = 14,
+}, TitleBar)
+corner(CloseBtn, 6)
+
+makeDraggable(Main, TitleBar)
+
+-- Thân bảng
+local Body = new("Frame", {
+    Size = UDim2.new(1, -16, 1, -82), Position = UDim2.new(0, 8, 0, 44),
+    BackgroundTransparency = 1,
+}, Main)
+
+-- ── Cột trái: Palette + Vị trí ──
+local Left = new("Frame", {
+    Size = UDim2.new(0, 196, 1, 0), BackgroundColor3 = C.panel, BorderSizePixel = 0,
+}, Body)
+corner(Left, 10)
+
+new("TextLabel", {
+    Size = UDim2.new(1, -16, 0, 18), Position = UDim2.new(0, 8, 0, 6),
+    BackgroundTransparency = 1, Text = "KHỐI LỆNH", TextColor3 = C.muted,
+    Font = Enum.Font.GothamBold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
+}, Left)
+
+local Palette = new("ScrollingFrame", {
+    Size = UDim2.new(1, -12, 0, 196), Position = UDim2.new(0, 6, 0, 26),
+    BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 4,
+    CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+}, Left)
+new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, Palette)
+
+-- Vùng quản lý vị trí
+new("TextLabel", {
+    Size = UDim2.new(1, -16, 0, 18), Position = UDim2.new(0, 8, 0, 228),
+    BackgroundTransparency = 1, Text = "VỊ TRÍ (bấm + để lấy)", TextColor3 = C.muted,
+    Font = Enum.Font.GothamBold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
+}, Left)
+
+local PosList = new("ScrollingFrame", {
+    Size = UDim2.new(1, -12, 1, -286), Position = UDim2.new(0, 6, 0, 248),
+    BackgroundColor3 = C.bg, BorderSizePixel = 0, ScrollBarThickness = 4,
+    CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+}, Left)
+corner(PosList, 8)
+new("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }, PosList)
+pad(PosList, 4)
+
+local PosBtns = new("Frame", {
+    Size = UDim2.new(1, -12, 0, 26), Position = UDim2.new(0, 6, 1, -32),
+    BackgroundTransparency = 1,
+}, Left)
+local AddPosBtn = new("TextButton", {
+    Size = UDim2.new(0.62, -3, 1, 0), BackgroundColor3 = C.green, Text = "+ Lấy vị trí",
+    TextColor3 = C.text, Font = Enum.Font.GothamSemibold, TextSize = 11,
+}, PosBtns)
+corner(AddPosBtn, 6)
+local DelPosBtn = new("TextButton", {
+    Size = UDim2.new(0.38, -3, 1, 0), Position = UDim2.new(0.62, 3, 0, 0),
+    BackgroundColor3 = Color3.fromRGB(120, 60, 60), Text = "Xóa cuối",
+    TextColor3 = C.text, Font = Enum.Font.GothamSemibold, TextSize = 11,
+}, PosBtns)
+corner(DelPosBtn, 6)
+
+-- ── Cột phải: vùng chương trình ──
+local Right = new("Frame", {
+    Size = UDim2.new(1, -204, 1, 0), Position = UDim2.new(0, 204, 0, 0),
+    BackgroundColor3 = C.panel, BorderSizePixel = 0,
+}, Body)
+corner(Right, 10)
+new("TextLabel", {
+    Size = UDim2.new(1, -16, 0, 18), Position = UDim2.new(0, 10, 0, 6),
+    BackgroundTransparency = 1, Text = "CHƯƠNG TRÌNH ▼ (chạy từ trên xuống)",
+    TextColor3 = C.muted, Font = Enum.Font.GothamBold, TextSize = 11,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, Right)
+
+-- Khối "mũ" cố định trên cùng
+local HatBlock = new("Frame", {
+    Size = UDim2.new(1, -20, 0, 30), Position = UDim2.new(0, 10, 0, 28),
+    BackgroundColor3 = C.purple, BorderSizePixel = 0,
+}, Right)
+corner(HatBlock, 8)
+new("TextLabel", {
+    Size = UDim2.new(1, -16, 1, 0), Position = UDim2.new(0, 10, 0, 0),
+    BackgroundTransparency = 1, Text = "▶ Khi ấn nút KÍCH HOẠT", TextColor3 = C.text,
+    Font = Enum.Font.GothamBold, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
+}, HatBlock)
+
+local Canvas = new("ScrollingFrame", {
+    Size = UDim2.new(1, -16, 1, -104), Position = UDim2.new(0, 10, 0, 64),
+    BackgroundColor3 = C.bg, BorderSizePixel = 0, ScrollBarThickness = 5,
+    CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+}, Right)
+corner(Canvas, 8)
+new("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }, Canvas)
+pad(Canvas, 6)
+
+-- Nút dưới cùng (3 nút: Tạo Script | Tạo Mã | Xóa)
+local CreateBtn = new("TextButton", {
+    Size = UDim2.new(0.40, -6, 0, 30), Position = UDim2.new(0, 10, 1, -34),
+    BackgroundColor3 = C.title, Text = "✅ TẠO SCRIPT", TextColor3 = C.text,
+    Font = Enum.Font.GothamBold, TextSize = 12,
+}, Right)
+corner(CreateBtn, 7)
+local CodeBtn = new("TextButton", {
+    Size = UDim2.new(0.32, -6, 0, 30), Position = UDim2.new(0.40, 8, 1, -34),
+    BackgroundColor3 = C.teal, Text = "📜 SCRIPT GỐC", TextColor3 = C.text,
+    Font = Enum.Font.GothamBold, TextSize = 12,
+}, Right)
+corner(CodeBtn, 7)
+local ClearBtn = new("TextButton", {
+    Size = UDim2.new(0.28, -10, 0, 30), Position = UDim2.new(0.72, 8, 1, -34),
+    BackgroundColor3 = Color3.fromRGB(90, 60, 60), Text = "🗑 XÓA", TextColor3 = C.text,
+    Font = Enum.Font.GothamSemibold, TextSize = 12,
+}, Right)
+corner(ClearBtn, 7)
+
+-- ============================================================
+-- [J] RENDER VỊ TRÍ
+-- ============================================================
+local function renderPositions()
+    for _, ch in ipairs(PosList:GetChildren()) do
+        if ch:IsA("TextLabel") then ch:Destroy() end
+    end
+    for i, p in ipairs(positions) do
+        new("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 18), BackgroundTransparency = 1, LayoutOrder = i,
+            Text = string.format("  %s  (%.0f, %.0f, %.0f)", p.label, p.pos.X, p.pos.Y, p.pos.Z),
+            TextColor3 = C.text, Font = Enum.Font.Gotham, TextSize = 10,
+            TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+        }, PosList)
+    end
+end
+
+-- ============================================================
+-- [K] RENDER CHƯƠNG TRÌNH (các khối)
+-- ============================================================
+local renderScript -- forward declare
+
+local function makeCycleBtn(parent, xOffset, width, text, onClick)
+    local b = new("TextButton", {
+        Size = UDim2.new(0, width, 0, 22), Position = UDim2.new(0, xOffset, 0.5, -11),
+        BackgroundColor3 = Color3.fromRGB(255,255,255), Text = text,
+        TextColor3 = Color3.fromRGB(20,20,20), Font = Enum.Font.GothamSemibold, TextSize = 11,
+    }, parent)
+    corner(b, 5)
+    b.MouseButton1Click:Connect(onClick)
+    return b
+end
+
+local function createBlockRow(block, index)
+    local def = BLOCK_DEFS[block.type]
+    local row = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = def.color,
+        BorderSizePixel = 0, LayoutOrder = index,
+    }, Canvas)
+    corner(row, 7)
+
+    -- Nhãn khối
+    local labelW = (#def.params >= 3) and 96 or 130
+    new("TextLabel", {
+        Size = UDim2.new(0, labelW, 1, 0), Position = UDim2.new(0, 8, 0, 0),
+        BackgroundTransparency = 1, Text = def.label, TextColor3 = C.text,
+        Font = Enum.Font.GothamSemibold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, row)
+
+    -- Caption nhỏ phía trên 1 ô số
+    local function captioned(xOffset, w, caption, value, onChange)
+        new("TextLabel", {
+            Size = UDim2.new(0, w, 0, 9), Position = UDim2.new(0, xOffset, 0, 2),
+            BackgroundTransparency = 1, Text = caption, TextColor3 = C.text,
+            Font = Enum.Font.Gotham, TextSize = 8, TextTransparency = 0.25,
+        }, row)
+        local box = new("TextBox", {
+            Size = UDim2.new(0, w, 0, 20), Position = UDim2.new(0, xOffset, 0, 12),
+            BackgroundColor3 = Color3.fromRGB(255,255,255), Text = value,
+            TextColor3 = Color3.fromRGB(20,20,20), Font = Enum.Font.GothamSemibold, TextSize = 11,
+            ClearTextOnFocus = false,
+        }, row)
+        corner(box, 5)
+        box.FocusLost:Connect(function() onChange(box.Text) end)
+        return box
+    end
+    local function numField(field, caption, w, x)
+        captioned(x, w, caption, tostring(block[field]), function(t)
+            local n = tonumber(t); if n then block[field] = n end
+        end)
+        return x + w + 4
+    end
+
+    local x = 8 + labelW + 6
+    -- Tham số
+    for _, p in ipairs(def.params) do
+        if p == "ms" then
+            x = numField("ms", "ms", 56, x)
+        elseif p == "unit" then
+            captioned(x, 36, "ô", tostring(block.unit), function(t)
+                if t ~= "" then block.unit = t end
+            end); x = x + 40
+        elseif p == "from"  then x = numField("from", "ô từ", 40, x)
+        elseif p == "to"    then x = numField("to", "đến", 40, x)
+        elseif p == "dur"   then x = numField("dur", "giây", 44, x)
+        elseif p == "count" then
+            captioned(x, 56, "số lần (0=∞)", tostring(block.count), function(t)
+                local n = tonumber(t); if n then block.count = math.max(0, math.floor(n)) end
+            end); x = x + 60
+        elseif p == "pos" then
+            local btn
+            btn = makeCycleBtn(row, x, 44, (positions[block.posIndex] and positions[block.posIndex].label) or "?",
+            function()
+                if #positions == 0 then return end
+                block.posIndex = (block.posIndex % #positions) + 1
+                btn.Text = positions[block.posIndex].label
+            end)
+            x = x + 50
+        elseif p == "level" then
+            local btn
+            btn = makeCycleBtn(row, x, 100, block.level .. ":" .. DIFFICULTY_NAMES[block.level],
+            function()
+                block.level = (block.level % 5) + 1
+                btn.Text = block.level .. ":" .. DIFFICULTY_NAMES[block.level]
+            end)
+            x = x + 106
+        end
+    end
+
+    -- Nút điều khiển bên phải: ↑ ↓ ✕
+    local function ctrlBtn(posX, txt, col, fn)
+        local b = new("TextButton", {
+            Size = UDim2.new(0, 22, 0, 22), Position = UDim2.new(1, posX, 0.5, -11),
+            BackgroundColor3 = col, Text = txt, TextColor3 = C.text,
+            Font = Enum.Font.GothamBold, TextSize = 12,
+        }, row)
+        corner(b, 5)
+        b.MouseButton1Click:Connect(fn)
+    end
+    ctrlBtn(-78, "↑", Color3.fromRGB(0,0,0):Lerp(def.color,0.4), function()
+        if index > 1 then
+            scriptBlocks[index], scriptBlocks[index-1] = scriptBlocks[index-1], scriptBlocks[index]
+            renderScript()
+        end
+    end)
+    ctrlBtn(-52, "↓", Color3.fromRGB(0,0,0):Lerp(def.color,0.4), function()
+        if index < #scriptBlocks then
+            scriptBlocks[index], scriptBlocks[index+1] = scriptBlocks[index+1], scriptBlocks[index]
+            renderScript()
+        end
+    end)
+    ctrlBtn(-26, "✕", C.red, function()
+        table.remove(scriptBlocks, index)
+        renderScript()
+    end)
+end
+
+renderScript = function()
+    for _, ch in ipairs(Canvas:GetChildren()) do
+        if ch:IsA("Frame") then ch:Destroy() end
+    end
+    if #scriptBlocks == 0 then
+        new("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 40), BackgroundTransparency = 1,
+            Text = "Bấm khối lệnh bên trái để thêm vào đây...",
+            TextColor3 = C.muted, Font = Enum.Font.Gotham, TextSize = 12,
+        }, Canvas)
+        return
+    end
+    for i, b in ipairs(scriptBlocks) do
+        createBlockRow(b, i)
+    end
+end
+
+-- ============================================================
+-- [L] PALETTE: nút thêm khối
+-- ============================================================
+for i, t in ipairs(PALETTE_ORDER) do
+    local def = BLOCK_DEFS[t]
+    local b = new("TextButton", {
+        Size = UDim2.new(1, -4, 0, 30), BackgroundColor3 = def.color,
+        Text = def.label, TextColor3 = C.text, Font = Enum.Font.GothamSemibold,
+        TextSize = 11, LayoutOrder = i, TextXAlignment = Enum.TextXAlignment.Left,
+    }, Palette)
+    corner(b, 6)
+    pad(b, 8)
+    b.MouseButton1Click:Connect(function()
+        table.insert(scriptBlocks, defaultBlock(t))
+        renderScript()
+    end)
+end
+
+-- ============================================================
+-- [M] SỰ KIỆN NÚT VỊ TRÍ
+-- ============================================================
+AddPosBtn.MouseButton1Click:Connect(function()
+    local char = localPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then setStatus("Không tìm thấy nhân vật!"); return end
+    local idx = #positions + 1
+    positions[idx] = { label = indexToLetter(idx), pos = root.Position }
+    renderPositions()
+    print("📍 Đã lấy vị trí " .. positions[idx].label)
+end)
+
+DelPosBtn.MouseButton1Click:Connect(function()
+    if #positions == 0 then return end
+    table.remove(positions, #positions)
+    for _, b in ipairs(scriptBlocks) do
+        if b.posIndex and b.posIndex > #positions then b.posIndex = math.max(1, #positions) end
+    end
+    renderPositions()
+    renderScript()
+end)
+
+-- ============================================================
+-- [N0] CÀI ĐẶT ĐỘ LỆCH CHUỘT – TEST BẰNG UNIT Ô 1 GIỮA MÀN
+-- ============================================================
+-- Marker đỏ thể hiện ĐIỂM CHUỘT SẼ ẤN = tâm unit + (OFFSET_X, OFFSET_Y)
+local function makeMarker()
+    local f = new("Frame", {
+        Size = UDim2.new(0, 30, 0, 30), BackgroundTransparency = 1,
+        Visible = false, ZIndex = 60,
+    }, ScreenGui)
+    new("Frame", { Size = UDim2.new(1, 0, 0, 2), Position = UDim2.new(0, 0, 0.5, -1),
+        BackgroundColor3 = C.red, BorderSizePixel = 0, ZIndex = 61 }, f)
+    new("Frame", { Size = UDim2.new(0, 2, 1, 0), Position = UDim2.new(0.5, -1, 0, 0),
+        BackgroundColor3 = C.red, BorderSizePixel = 0, ZIndex = 61 }, f)
+    local ring = new("Frame", { Size = UDim2.new(0, 18, 0, 18), Position = UDim2.new(0.5, -9, 0.5, -9),
+        BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 61 }, f)
+    new("UICorner", { CornerRadius = UDim.new(1, 0) }, ring)
+    new("UIStroke", { Color = C.red, Thickness = 2 }, ring)
+    local lbl = new("TextLabel", {
+        Size = UDim2.new(0, 130, 0, 16), Position = UDim2.new(0, 20, 0, -20),
+        BackgroundColor3 = C.bg, BackgroundTransparency = 0.1, Text = "",
+        TextColor3 = C.text, Font = Enum.Font.GothamSemibold, TextSize = 11, ZIndex = 62,
+    }, f)
+    corner(lbl, 4)
+    return f, lbl
+end
+local offsetMarker, offsetMarkerLbl = makeMarker()
+
+-- Trạng thái test
+local testActive   = false
+local testSlot     = nil
+local testOrig     = nil  -- { parent=, pos=, anchor= }
+
+local function startOffsetTest()
+    local slot, elements = getHotbarSlot(OFFSET_TEST_SLOT)
+    if not (slot and elements) then
+        setStatus("Không tìm thấy unit ô " .. OFFSET_TEST_SLOT .. " (mở game trước nhé)")
+        return false
+    end
+    testSlot = slot
+    testOrig = { parent = slot.Parent, pos = slot.Position, anchor = slot.AnchorPoint }
+    slot.Parent      = elements
+    slot.AnchorPoint = Vector2.new(0.5, 0.5)
+    slot.Position    = UDim2.new(0.5, 0, 0.5, 0)
+    return true
+end
+
+local function stopOffsetTest()
+    if testSlot and testOrig then
+        pcall(function()
+            testSlot.AnchorPoint = testOrig.anchor
+            testSlot.Position    = testOrig.pos
+            testSlot.Parent      = testOrig.parent
+        end)
+    end
+    testSlot, testOrig = nil, nil
+end
+
+-- Cập nhật vị trí marker theo unit + offset (mỗi frame khi đang test)
+RunService.Heartbeat:Connect(function()
+    if testActive and testSlot and testSlot.Parent then
+        local ap, sz = testSlot.AbsolutePosition, testSlot.AbsoluteSize
+        local cx = ap.X + sz.X / 2 + OFFSET_X
+        local cy = ap.Y + sz.Y / 2 + OFFSET_Y
+        offsetMarker.Position = UDim2.new(0, cx - 15, 0, cy - 15)
+        offsetMarkerLbl.Text  = string.format(" Lệch: %d, %d", math.floor(OFFSET_X), math.floor(OFFSET_Y))
+    end
+end)
+
+-- ── Bảng cài đặt (overlay phủ lên thân) ──
+local Settings = new("Frame", {
+    Size = Body.Size, Position = Body.Position,
+    BackgroundColor3 = C.panel, BorderSizePixel = 0, Visible = false, ZIndex = 10,
+}, Main)
+corner(Settings, 10)
+pad(Settings, 12)
+
+new("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 22), Position = UDim2.new(0, 0, 0, 0),
+    BackgroundTransparency = 1, Text = "⚙ CÀI ĐẶT", TextColor3 = C.text,
+    Font = Enum.Font.GothamBold, TextSize = 15, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 11,
+}, Settings)
+
+-- Card test độ lệch
+local testCard = new("Frame", {
+    Size = UDim2.new(1, 0, 0, 184), Position = UDim2.new(0, 0, 0, 32),
+    BackgroundColor3 = C.bg, BorderSizePixel = 0, ZIndex = 11,
+}, Settings)
+corner(testCard, 8); pad(testCard, 12)
+stroke(testCard, C.panel2, 1)
+
+new("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 18), Position = UDim2.new(0, 0, 0, 0),
+    BackgroundTransparency = 1, Text = "🖱 Test độ lệch chuột (Offset Click)", TextColor3 = C.text,
+    Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12,
+}, testCard)
+new("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 32), Position = UDim2.new(0, 0, 0, 22),
+    BackgroundTransparency = 1, TextWrapped = true,
+    Text = "Bật test → đưa Unit ô " .. OFFSET_TEST_SLOT .. " ra GIỮA màn. Chấm ĐỎ = nơi chuột sẽ ấn. Chỉnh X/Y cho chấm trùng ảnh unit rồi bấm Click thử.",
+    TextColor3 = C.muted, Font = Enum.Font.Gotham, TextSize = 10,
+    TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 12,
+}, testCard)
+
+-- Hộp nhập X/Y + ô (mỗi ô có nhãn riêng phía trên để không chồng nhau)
+local OFFx_box, OFFy_box
+local function makeLabeledBox(parent, x, y, w, cap, val, onChange)
+    new("TextLabel", {
+        Size = UDim2.new(0, w, 0, 12), Position = UDim2.new(0, x, 0, y),
+        BackgroundTransparency = 1, Text = cap, TextColor3 = C.muted,
+        Font = Enum.Font.GothamSemibold, TextSize = 10,
+        TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12,
+    }, parent)
+    local box = new("TextBox", {
+        Size = UDim2.new(0, w, 0, 26), Position = UDim2.new(0, x, 0, y + 14),
+        BackgroundColor3 = Color3.fromRGB(255,255,255), Text = tostring(val),
+        TextColor3 = Color3.fromRGB(20,20,20), Font = Enum.Font.GothamSemibold,
+        TextSize = 12, ClearTextOnFocus = false, ZIndex = 12,
+    }, parent)
+    corner(box, 5)
+    box.FocusLost:Connect(function() onChange(box.Text) end)
+    return box
+end
+
+OFFx_box = makeLabeledBox(testCard, 0,   62, 70, "Lệch X", math.floor(OFFSET_X), function(t)
+    local n = tonumber(t); if n then OFFSET_X = n end
+end)
+OFFy_box = makeLabeledBox(testCard, 80,  62, 70, "Lệch Y", math.floor(OFFSET_Y), function(t)
+    local n = tonumber(t); if n then OFFSET_Y = n end
+end)
+
+-- ô slot test
+local slotBox = makeLabeledBox(testCard, 160, 62, 54, "Unit ô", OFFSET_TEST_SLOT, function(t)
+    if t ~= "" then
+        OFFSET_TEST_SLOT = t
+        if testActive then stopOffsetTest(); startOffsetTest() end
+    end
+end)
+
+-- Nút bật/tắt test
+local toggleBtn = new("TextButton", {
+    Size = UDim2.new(0.5, -6, 0, 32), Position = UDim2.new(0, 0, 0, 112),
+    BackgroundColor3 = C.green, Text = "▶ Bật Test", TextColor3 = C.text,
+    Font = Enum.Font.GothamBold, TextSize = 12, ZIndex = 12,
+}, testCard)
+corner(toggleBtn, 6)
+
+-- Nút click thử
+local testClickBtn = new("TextButton", {
+    Size = UDim2.new(0.5, -6, 0, 32), Position = UDim2.new(0.5, 6, 0, 112),
+    BackgroundColor3 = C.title, Text = "👆 Click thử", TextColor3 = C.text,
+    Font = Enum.Font.GothamBold, TextSize = 12, ZIndex = 12,
+}, testCard)
+corner(testClickBtn, 6)
+
+local function refreshBoxes()
+    if OFFx_box then OFFx_box.Text = tostring(math.floor(OFFSET_X)) end
+    if OFFy_box then OFFy_box.Text = tostring(math.floor(OFFSET_Y)) end
+end
+
+local function setOffsetTest(on)
+    if on == testActive then return end
+    if on then
+        if startOffsetTest() then
+            testActive = true
+            offsetMarker.Visible = true
+            toggleBtn.Text = "⏹ Tắt Test"
+            toggleBtn.BackgroundColor3 = C.red
+            setStatus("Đang test offset – kéo chỉnh X/Y cho chấm đỏ trùng unit.")
+        end
+    else
+        testActive = false
+        stopOffsetTest()
+        offsetMarker.Visible = false
+        toggleBtn.Text = "▶ Bật Test"
+        toggleBtn.BackgroundColor3 = C.green
+    end
+end
+
+toggleBtn.MouseButton1Click:Connect(function() setOffsetTest(not testActive) end)
+testClickBtn.MouseButton1Click:Connect(function()
+    if not testActive then setOffsetTest(true); task.wait(0.25) end
+    if testSlot then
+        setStatus("Click thử tại tâm unit + lệch (chọn unit)...")
+        forceClickObject(testSlot)
+    end
+end)
+
+new("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 36), Position = UDim2.new(0, 0, 0, 226),
+    BackgroundTransparency = 1, TextWrapped = true,
+    Text = "Mẹo: Mặc định lệch 38, 130. Khi chấm đỏ nằm đúng giữa ảnh unit là chuẩn. Tắt Test sẽ tự đưa Unit về thanh cũ.",
+    TextColor3 = C.muted, Font = Enum.Font.Gotham, TextSize = 10,
+    TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 11,
+}, Settings)
+
+local settingsOpen = false
+local function setSettings(open)
+    settingsOpen = open
+    Settings.Visible = open
+    if not open then
+        setOffsetTest(false)
+    else
+        refreshBoxes()
+    end
+    SettingsBtn.BackgroundColor3 = open and C.title or C.panel2
+end
+SettingsBtn.MouseButton1Click:Connect(function() setSettings(not settingsOpen) end)
+
+-- ============================================================
+-- [N1] TẠO MÃ SCRIPT (xuất text + copy tất cả)
+-- ============================================================
+local function fmtVal(v)
+    if type(v) == "string" then return string.format("%q", v) end
+    if type(v) == "number" then
+        if math.floor(v) == v then return tostring(math.floor(v)) end
+        return tostring(v)
+    end
+    return tostring(v)
+end
+
+-- Phần "thân chạy" tĩnh của script nguyên mã (giống 100% logic Tạo Script).
+-- Dùng long-string [==[ ]==] để giữ nguyên định dạng.
+local STANDALONE_BODY = [==[
+-- ── BẢNG MÀU ──
+local C = {
+    bg    = Color3.fromRGB(15, 16, 26),  panel  = Color3.fromRGB(25, 27, 42),
+    panel2= Color3.fromRGB(38, 41, 60),  title  = Color3.fromRGB(0, 122, 224),
+    text  = Color3.fromRGB(240,244,255), muted  = Color3.fromRGB(150,160,185),
+    green = Color3.fromRGB(40,175,100),  red    = Color3.fromRGB(210,65,65),
+}
+
+-- ── TIỆN ÍCH GUI ──
+local function new(class, props, parent)
+    local o = Instance.new(class)
+    for k, v in pairs(props or {}) do o[k] = v end
+    if parent then o.Parent = parent end
+    return o
+end
+local function corner(obj, r) new("UICorner", { CornerRadius = UDim.new(0, r or 8) }, obj) end
+local function stroke(obj, col, th)
+    new("UIStroke", { Color = col or C.panel2, Thickness = th or 1,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, obj)
+end
+local function makeDraggable(frame, handle)
+    local dragging, dragStart, startPos = false, nil, nil
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging, dragStart, startPos = true, input.Position, frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
+                startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+end
+
+-- ── TRẠNG THÁI / CLICK ──
+local isRunning = false
+local activeStatusLabel = nil
+local function setStatus(txt)
+    if activeStatusLabel then activeStatusLabel.Text = "Trạng thái: " .. txt end
+    print("[Macro] " .. txt)
+end
+local function findByPath(root, path)
+    local cur = root
+    for seg in string.gmatch(path, "[^.]+") do
+        if cur then cur = cur:FindFirstChild(seg) else return nil end
+    end
+    return cur
+end
+local function isGloballyVisible(obj)
+    if not obj then return false end
+    local cur = obj
+    while cur and cur ~= playerGui do
+        if cur:IsA("GuiObject") and not cur.Visible then return false end
+        cur = cur.Parent
+    end
+    return true
+end
+local function safeClick(button)
+    if not (button and button.Visible) then return end
+    local oldSel = GuiService.SelectedObject
+    GuiService.SelectedObject = button
+    task.wait(0.01)
+    local clicked = false
+    pcall(function()
+        if getconnections then
+            for _, c in pairs(getconnections(button.MouseButton1Click)) do c:Fire(); clicked = true end
+            for _, c in pairs(getconnections(button.MouseButton1Down)) do c:Fire() end
+            for _, c in pairs(getconnections(button.Activated))        do c:Fire() end
+        end
+    end)
+    if not clicked then
+        pcall(function()
+            if button:IsA("TextButton") or button:IsA("ImageButton") then button:SimulateClick() end
+        end)
+    end
+    GuiService.SelectedObject = oldSel
+end
+local function forceClickObject(guiObject)
+    if not guiObject then return end
+    local absPos, absSize = guiObject.AbsolutePosition, guiObject.AbsoluteSize
+    local fx = absPos.X + (absSize.X / 2) + OFFSET_X
+    local fy = absPos.Y + (absSize.Y / 2) + OFFSET_Y
+    pcall(function()
+        VirtualInputManager:SendMouseButtonEvent(fx, fy, 0, true,  game, 1)
+        task.wait(0.04)
+        VirtualInputManager:SendMouseButtonEvent(fx, fy, 0, false, game, 1)
+    end)
+    pcall(function()
+        if firesignal then
+            if guiObject:IsA("GuiButton") then
+                firesignal(guiObject.MouseButton1Down); firesignal(guiObject.MouseButton1Click)
+                firesignal(guiObject.Activated);        firesignal(guiObject.MouseButton1Up)
+            end
+            local fDown = {UserInputType = Enum.UserInputType.MouseButton1, UserInputState = Enum.UserInputState.Begin}
+            local fUp   = {UserInputType = Enum.UserInputType.MouseButton1, UserInputState = Enum.UserInputState.End}
+            firesignal(guiObject.InputBegan, fDown)
+            task.wait(0.02)
+            firesignal(guiObject.InputEnded, fUp)
+        end
+    end)
+end
+
+-- ── HÀNH ĐỘNG CƠ BẢN ──
+local function getHotbarSlot(slotName)
+    local mainHud = playerGui:FindFirstChild("MainHud")
+    if not mainHud then return nil end
+    local elements  = mainHud:FindFirstChild("Elements")
+    local hotbar    = elements and elements:FindFirstChild("Hotbar")
+    local mainframe = hotbar and hotbar:FindFirstChild("MainFrame")
+    if not (elements and mainframe) then return nil, elements, mainframe end
+    local slot = mainframe:FindFirstChild(slotName) or elements:FindFirstChild(slotName)
+    if not slot then
+        for _, c in ipairs(mainframe:GetChildren()) do
+            if c:IsA("GuiObject") then slot = c break end
+        end
+    end
+    return slot, elements, mainframe
+end
+local function teleportSelf(pos)
+    local char = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local head = char and char:FindFirstChild("Head")
+    if root then
+        root.CFrame = CFrame.new(pos)
+        localPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+        task.wait(0.12)
+        local cam = workspace.CurrentCamera
+        if cam and head then cam.CFrame = CFrame.lookAt(head.Position, head.Position + CAMERA_LOOK) end
+    end
+end
+local function deployUnitOnce(unitName, targetPos)
+    if not isRunning then return false end
+    local slot, elements, mainframe = getHotbarSlot(unitName)
+    if not (slot and elements and mainframe) then
+        warn("Khong tim thay slot: " .. unitName); return false
+    end
+    slot.Parent = elements
+    slot.AnchorPoint = Vector2.new(0.5, 0.5)
+    slot.Position = UDim2.new(0.5, 0, 0.5, 0)
+    task.wait(STEP_DELAY)
+    teleportSelf(targetPos)
+    task.wait(STEP_DELAY)
+    forceClickObject(slot)
+    task.wait(STEP_DELAY)
+    local placeBtn
+    local deadline = os.clock() + 1.0
+    repeat
+        placeBtn = findByPath(playerGui, "MainHud.Elements.Hud.PlaceButton")
+        if placeBtn and isGloballyVisible(placeBtn) then break end
+        task.wait(0.1)
+    until os.clock() >= deadline
+    local placed = false
+    if placeBtn then forceClickObject(placeBtn); placed = true
+    else warn("Khong tim thay PlaceButton (" .. unitName .. ")") end
+    task.wait(0.35)
+    if slot and slot.Parent == elements then slot.Parent = mainframe end
+    localPlayer.CameraMode = Enum.CameraMode.Classic
+    task.wait(STEP_DELAY)
+    return placed
+end
+local function deployUnit(unitName, targetPos, maxTries)
+    maxTries = maxTries or 3
+    for attempt = 1, maxTries do
+        if not isRunning then return false end
+        if deployUnitOnce(unitName, targetPos) then
+            print(string.format("OK Dat Unit %s (lan %d)", unitName, attempt)); return true
+        end
+        warn(string.format("Hut Unit %s (lan %d/%d)", unitName, attempt, maxTries))
+        task.wait(0.4)
+    end
+    return false
+end
+local function waitAndClick(path, timeoutSec)
+    timeoutSec = timeoutSec or 90
+    local label = path:match("[^.]+$")
+    setStatus("Cho: " .. label .. "...")
+    local deadline = os.clock() + timeoutSec
+    while isRunning and os.clock() < deadline do
+        local btn = findByPath(playerGui, path)
+        if btn and isGloballyVisible(btn) then
+            task.wait(0.1); safeClick(btn); print("OK click: " .. label); return true
+        end
+        task.wait(0.3)
+    end
+    warn("Timeout cho: " .. label); return false
+end
+local function waitForPlayAgain(path)
+    local label = path:match("[^.]+$")
+    local waited = 0
+    while isRunning do
+        local btn = findByPath(playerGui, path)
+        if btn and isGloballyVisible(btn) then
+            task.wait(0.2)
+            for _ = 1, 3 do
+                if not isRunning then break end
+                safeClick(btn); task.wait(0.25)
+                if not (btn.Parent and isGloballyVisible(btn)) then break end
+            end
+            print("OK click: " .. label); return true
+        end
+        task.wait(0.5); waited = waited + 0.5
+        if waited % 10 < 0.5 then setStatus(string.format("Cho PlayAgain... (%ds)", math.floor(waited))) end
+    end
+    return false
+end
+local function isTeamMenuOpen()
+    local menu = findByPath(playerGui, PATHS.TeamMenu)
+    return menu ~= nil and menu.Visible == true
+end
+local function toggleTeamMenu()
+    local btn = findByPath(playerGui, PATHS.TeamBtn)
+    if btn then safeClick(btn) else warn("Khong tim thay nut Team!") end
+end
+local function closeTeamMenu()
+    if not isTeamMenuOpen() then return end
+    local closeBtn = findByPath(playerGui, PATHS.CloseTeam)
+    if closeBtn then safeClick(closeBtn) else toggleTeamMenu() end
+    task.wait(0.25)
+end
+local function runUpgradeCycle(slotA, slotB, durationSec)
+    if not isRunning then return end
+    slotA = math.max(1, math.floor(tonumber(slotA) or 1))
+    slotB = math.max(slotA, math.floor(tonumber(slotB) or slotA))
+    durationSec = tonumber(durationSec) or 30
+    setStatus(string.format("Upgrade slot %d->%d / %ds...", slotA, slotB, durationSec))
+    if not isTeamMenuOpen() then toggleTeamMenu(); task.wait(0.5) end
+    local deadline = os.clock() + durationSec
+    while isRunning and os.clock() < deadline do
+        if not isTeamMenuOpen() then toggleTeamMenu(); task.wait(0.25) end
+        for i = slotA, slotB do
+            if not isRunning then break end
+            local upgradeBtn = findByPath(playerGui,
+                "MainHud.Menus.TeamManager.Menu.Towers.Listings." .. i .. ".UpgradeButtons.Upgrade")
+            if upgradeBtn then safeClick(upgradeBtn) end
+        end
+        task.wait(0.1)
+    end
+    task.wait(0.3); closeTeamMenu()
+    print(string.format("OK xong upgrade slot %d->%d!", slotA, slotB))
+end
+
+-- ── EXECUTOR ──
+local function runOneBlock(b)
+    if b.type == "wait" then
+        local ms = tonumber(b.ms) or 0
+        setStatus("Cho " .. ms .. " ms")
+        local left = ms / 1000
+        while isRunning and left > 0 do
+            local step = math.min(0.2, left); task.wait(step); left = left - step
+        end
+    elseif b.type == "teleport" then
+        local p = positions[b.posIndex]
+        if p then setStatus("Dich chuyen -> " .. p.label); teleportSelf(p.pos)
+                  localPlayer.CameraMode = Enum.CameraMode.Classic end
+    elseif b.type == "unit" then
+        local p = positions[b.posIndex]
+        if p then setStatus("Dat Unit " .. b.unit .. " -> " .. p.label); deployUnit(b.unit, p.pos, 3) end
+    elseif b.type == "upgrade" then
+        runUpgradeCycle(b.from, b.to, b.dur)
+    elseif b.type == "play" then
+        waitAndClick(PATHS.Play, 180); task.wait(0.6)
+    elseif b.type == "startgame" then
+        waitAndClick(PATHS.StartGame, 180); task.wait(0.6)
+    elseif b.type == "difficulty" then
+        local path = DIFFICULTY_PATHS[b.level]
+        if path then setStatus("Chon do kho " .. (DIFFICULTY_NAMES[b.level] or b.level))
+                     waitAndClick(path, 90); task.wait(0.6) end
+    elseif b.type == "playagain" then
+        waitForPlayAgain(PATHS.PlayAgain); task.wait(1.0)
+    end
+end
+local function runCompiledScript(blocks)
+    local loopCount = {}
+    local i = 1
+    while isRunning and i <= #blocks do
+        local b = blocks[i]
+        if b.type == "loop" then
+            local target = tonumber(b.count) or 0
+            if target <= 0 then setStatus("Lap lai tu dau (vo han)"); i = 1
+            else
+                loopCount[i] = (loopCount[i] or 0) + 1
+                if loopCount[i] < target then
+                    setStatus(string.format("Lap %d/%d", loopCount[i], target)); i = 1
+                else loopCount[i] = nil; i = i + 1 end
+            end
+        else runOneBlock(b); i = i + 1 end
+    end
+    pcall(function() localPlayer.CameraMode = Enum.CameraMode.Classic end)
+end
+
+-- ── MENU KÍCH HOẠT ──
+for _, g in ipairs({CoreGui, playerGui}) do
+    local old = g:FindFirstChild("FullMacroStandaloneGui")
+    if old then old:Destroy() end
+end
+local RunGui = new("ScreenGui", { Name = "FullMacroStandaloneGui", ResetOnSpawn = false })
+pcall(function() RunGui.Parent = CoreGui end)
+if not RunGui.Parent then RunGui.Parent = playerGui end
+
+local rf = new("Frame", {
+    Size = UDim2.new(0, 250, 0, 158), Position = UDim2.new(0.5, -125, 0.5, -79),
+    BackgroundColor3 = C.bg, BorderSizePixel = 0,
+}, RunGui)
+corner(rf, 12); stroke(rf, C.panel2, 1)
+local rbar = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundColor3 = C.title, BorderSizePixel = 0 }, rf)
+corner(rbar, 12)
+new("Frame", { Size = UDim2.new(1,0,0,12), Position = UDim2.new(0,0,1,-12),
+    BackgroundColor3 = C.title, BorderSizePixel = 0 }, rbar)
+new("TextLabel", {
+    Size = UDim2.new(1, -40, 1, 0), Position = UDim2.new(0, 12, 0, 0), BackgroundTransparency = 1,
+    Text = "FULL MACRO (" .. #scriptBlocks .. " khoi)", TextColor3 = C.text,
+    Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
+}, rbar)
+local rClose = new("TextButton", {
+    Size = UDim2.new(0, 24, 0, 20), Position = UDim2.new(1, -30, 0.5, -10),
+    BackgroundColor3 = C.red, Text = "X", TextColor3 = C.text, Font = Enum.Font.GothamBold, TextSize = 12,
+}, rbar)
+corner(rClose, 5)
+makeDraggable(rf, rbar)
+
+local rStatus = new("TextLabel", {
+    Size = UDim2.new(1, -16, 0, 16), Position = UDim2.new(0, 8, 0, 40), BackgroundTransparency = 1,
+    Text = "Trang thai: San sang", TextColor3 = C.muted, Font = Enum.Font.Gotham, TextSize = 11,
+    TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+}, rf)
+new("TextLabel", {
+    Size = UDim2.new(1, -16, 0, 14), Position = UDim2.new(0, 8, 0, 58), BackgroundTransparency = 1,
+    Text = "Lap: dung khoi Loop trong chuong trinh", TextColor3 = C.muted,
+    Font = Enum.Font.Gotham, TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left,
+}, rf)
+
+local runThread
+local actBtn = new("TextButton", {
+    Size = UDim2.new(1, -16, 0, 32), Position = UDim2.new(0, 8, 0, 78),
+    BackgroundColor3 = C.green, Text = "KICH HOAT", TextColor3 = C.text,
+    Font = Enum.Font.GothamBold, TextSize = 14,
+}, rf)
+corner(actBtn, 7)
+local stopBtn = new("TextButton", {
+    Size = UDim2.new(1, -16, 0, 26), Position = UDim2.new(0, 8, 0, 114),
+    BackgroundColor3 = C.red, Text = "DUNG", TextColor3 = C.text,
+    Font = Enum.Font.GothamSemibold, TextSize = 12,
+}, rf)
+corner(stopBtn, 6)
+
+local function stopRun()
+    isRunning = false
+    if runThread then pcall(function() task.cancel(runThread) end) runThread = nil end
+    pcall(function() localPlayer.CameraMode = Enum.CameraMode.Classic end)
+    actBtn.Text = "KICH HOAT"; actBtn.BackgroundColor3 = C.green
+end
+actBtn.MouseButton1Click:Connect(function()
+    if isRunning then return end
+    if #scriptBlocks == 0 then rStatus.Text = "Trang thai: Chua co khoi nao!" return end
+    isRunning = true; activeStatusLabel = rStatus
+    actBtn.Text = "DANG CHAY..."; actBtn.BackgroundColor3 = Color3.fromRGB(120, 95, 0)
+    runThread = task.spawn(function()
+        runCompiledScript(scriptBlocks); stopRun(); setStatus("Hoan tat.")
+    end)
+end)
+stopBtn.MouseButton1Click:Connect(function() stopRun(); rStatus.Text = "Trang thai: Da dung." end)
+rClose.MouseButton1Click:Connect(function() stopRun(); RunGui:Destroy() end)
+
+print("OK FULL MACRO nguyen ma da tai! Bam KICH HOAT de chay.")
+]==]
+
+-- Sinh script NGUYÊN MÃ: chạy độc lập, có menu + kích hoạt/dừng/tiến trình,
+-- giống 100% chức năng "Tạo Script" nhưng không cần bảng ghép khối.
+local function generateScriptText()
+    local L = {}
+    local function add(s) L[#L+1] = s end
+
+    add("-- ============================================================")
+    add("-- FULL MACRO v5.0 - SCRIPT NGUYEN MA (chay truc tiep)")
+    add("-- Dan thang vao executor (Delta/Synapse/...) la chay duoc.")
+    add("-- Co san menu KICH HOAT / DUNG / Trang thai - " .. #scriptBlocks .. " khoi lenh.")
+    add("-- ============================================================")
+    add("")
+    add("local Players             = game:GetService(\"Players\")")
+    add("local CoreGui             = game:GetService(\"CoreGui\")")
+    add("local VirtualInputManager = game:GetService(\"VirtualInputManager\")")
+    add("local GuiService          = game:GetService(\"GuiService\")")
+    add("local UserInputService    = game:GetService(\"UserInputService\")")
+    add("local localPlayer = Players.LocalPlayer")
+    add("local playerGui   = localPlayer:WaitForChild(\"PlayerGui\")")
+    add("")
+    add("-- ── CẤU HÌNH (chỉnh sẵn theo Cài đặt của bạn) ──")
+    add(string.format("local OFFSET_X = %d", math.floor(OFFSET_X)))
+    add(string.format("local OFFSET_Y = %d", math.floor(OFFSET_Y)))
+    add(string.format("local CAMERA_LOOK = Vector3.new(%.4f, %.4f, %.4f)",
+        CAMERA_LOOK.X, CAMERA_LOOK.Y, CAMERA_LOOK.Z))
+    add(string.format("local STEP_DELAY  = %s", tostring(STEP_DELAY)))
+    add("")
+    add("local PATHS = {")
+    add(string.format("    Play      = %q,", PATHS.Play))
+    add(string.format("    StartGame = %q,", PATHS.StartGame))
+    add(string.format("    PlayAgain = %q,", PATHS.PlayAgain))
+    add(string.format("    TeamBtn   = %q,", PATHS.TeamBtn))
+    add(string.format("    TeamMenu  = %q,", PATHS.TeamMenu))
+    add(string.format("    CloseTeam = %q,", PATHS.CloseTeam))
+    add("}")
+    add("local DIFFICULTY_PATHS = {")
+    for i = 1, 5 do
+        add(string.format("    [%d] = %q,", i, DIFFICULTY_PATHS[i]))
+    end
+    add("}")
+    add("local DIFFICULTY_NAMES = {")
+    for i = 1, 5 do
+        add(string.format("    [%d] = %q,", i, DIFFICULTY_NAMES[i]))
+    end
+    add("}")
+    add("")
+    add("-- ── VỊ TRÍ ĐÃ LƯU ──")
+    add("local positions = {")
+    if #positions == 0 then
+        add("    -- (chưa có vị trí nào)")
+    end
+    for _, p in ipairs(positions) do
+        add(string.format("    { label = %q, pos = Vector3.new(%.2f, %.2f, %.2f) },",
+            p.label, p.pos.X, p.pos.Y, p.pos.Z))
+    end
+    add("}")
+    add("")
+    add("-- ── CHƯƠNG TRÌNH (chạy từ trên xuống) ──")
+    add("local scriptBlocks = {")
+    if #scriptBlocks == 0 then
+        add("    -- (chưa có khối lệnh nào)")
+    end
+    for i, b in ipairs(scriptBlocks) do
+        local parts = { string.format("type = %q", b.type) }
+        for k, v in pairs(b) do
+            if k ~= "type" then parts[#parts+1] = string.format("%s = %s", k, fmtVal(v)) end
+        end
+        add(string.format("    { %s },  -- %d. %s",
+            table.concat(parts, ", "), i, describeBlock(b)))
+    end
+    add("}")
+
+    -- Phần thân chạy tĩnh (logic + menu)
+    add(STANDALONE_BODY)
+    return table.concat(L, "\n")
+end
+
+-- Panel hiển thị mã
+local CodePanel = new("Frame", {
+    Size = Body.Size, Position = Body.Position,
+    BackgroundColor3 = C.panel, BorderSizePixel = 0, Visible = false, ZIndex = 30,
+}, Main)
+corner(CodePanel, 10); pad(CodePanel, 10)
+
+new("TextLabel", {
+    Size = UDim2.new(1, -70, 0, 22), BackgroundTransparency = 1,
+    Text = "📜 SCRIPT NGUYÊN MÃ (dán vào executor để chạy)", TextColor3 = C.text,
+    Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 31,
+}, CodePanel)
+
+local CodeCloseBtn = new("TextButton", {
+    Size = UDim2.new(0, 26, 0, 22), Position = UDim2.new(1, -26, 0, 0),
+    BackgroundColor3 = C.red, Text = "✕", TextColor3 = C.text,
+    Font = Enum.Font.GothamBold, TextSize = 13, ZIndex = 31,
+}, CodePanel)
+corner(CodeCloseBtn, 6)
+
+local CodeScroll = new("ScrollingFrame", {
+    Size = UDim2.new(1, 0, 1, -64), Position = UDim2.new(0, 0, 0, 28),
+    BackgroundColor3 = C.bg, BorderSizePixel = 0, ScrollBarThickness = 6,
+    CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y, ZIndex = 31,
+}, CodePanel)
+corner(CodeScroll, 8); pad(CodeScroll, 8)
+
+local CodeBox = new("TextBox", {
+    Size = UDim2.new(1, -8, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+    BackgroundTransparency = 1, Text = "", TextColor3 = C.text,
+    Font = Enum.Font.Code, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
+    TextYAlignment = Enum.TextYAlignment.Top, TextWrapped = true, MultiLine = true,
+    ClearTextOnFocus = false, TextEditable = false, ZIndex = 31,
+}, CodeScroll)
+
+local CopyAllBtn = new("TextButton", {
+    Size = UDim2.new(0.62, -4, 0, 30), Position = UDim2.new(0, 0, 1, -30),
+    BackgroundColor3 = C.green, Text = "📋 COPY TẤT CẢ SCRIPT", TextColor3 = C.text,
+    Font = Enum.Font.GothamBold, TextSize = 13, ZIndex = 31,
+}, CodePanel)
+corner(CopyAllBtn, 7)
+local RegenBtn = new("TextButton", {
+    Size = UDim2.new(0.38, -4, 0, 30), Position = UDim2.new(0.62, 4, 1, -30),
+    BackgroundColor3 = C.title, Text = "🔄 Tạo lại", TextColor3 = C.text,
+    Font = Enum.Font.GothamSemibold, TextSize = 12, ZIndex = 31,
+}, CodePanel)
+corner(RegenBtn, 7)
+
+local codeOpen = false
+local function openCodePanel()
+    setSettings(false)
+    CodeBox.Text = generateScriptText()
+    CodePanel.Visible = true
+    codeOpen = true
+end
+local function closeCodePanel()
+    CodePanel.Visible = false
+    codeOpen = false
+end
+
+CodeBtn.MouseButton1Click:Connect(function()
+    if codeOpen then closeCodePanel() else openCodePanel() end
+end)
+CodeCloseBtn.MouseButton1Click:Connect(closeCodePanel)
+RegenBtn.MouseButton1Click:Connect(function() CodeBox.Text = generateScriptText() end)
+CopyAllBtn.MouseButton1Click:Connect(function()
+    local ok = copyToClipboard(CodeBox.Text)
+    CopyAllBtn.Text = ok and "✅ ĐÃ COPY!" or "⚠️ Không hỗ trợ copy"
+    task.delay(1.4, function() CopyAllBtn.Text = "📋 COPY TẤT CẢ SCRIPT" end)
+end)
+
+-- ============================================================
+-- [N] THU NHỎ / ĐÓNG
+-- ============================================================
+local minimized = false
+MinBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    Body.Visible = not minimized
+    if minimized then
+        Settings.Visible = false
+        CodePanel.Visible = false
+        setOffsetTest(false)
+        Main.Size = UDim2.new(0, 700, 0, 38)
+        MinBtn.Text = "▢"
+    else
+        if settingsOpen then Settings.Visible = true end
+        if codeOpen then CodePanel.Visible = true end
+        Main.Size = UDim2.new(0, 700, 0, 430)
+        MinBtn.Text = "—"
+    end
+end)
+CloseBtn.MouseButton1Click:Connect(function()
+    setOffsetTest(false)
+    ScreenGui:Destroy()
+    local rg = (CoreGui:FindFirstChild("FullMacroRunGui")) or (playerGui:FindFirstChild("FullMacroRunGui"))
+    if rg then rg:Destroy() end
+    isRunning = false
+end)
+
+-- ============================================================
+-- [O] TẠO SCRIPT → MENU KÍCH HOẠT RIÊNG
+-- ============================================================
+local function buildRunMenu()
+    -- Bản sao chương trình tại thời điểm bấm "Tạo Script"
+    local snapshot = {}
+    for _, b in ipairs(scriptBlocks) do
+        local copy = {}
+        for k, v in pairs(b) do copy[k] = v end
+        snapshot[#snapshot + 1] = copy
+    end
+
+    -- Xóa menu cũ
+    for _, g in ipairs({CoreGui, playerGui}) do
+        local old = g:FindFirstChild("FullMacroRunGui")
+        if old then old:Destroy() end
+    end
+
+    local RunGui = new("ScreenGui", { Name = "FullMacroRunGui", ResetOnSpawn = false })
+    pcall(function() RunGui.Parent = CoreGui end)
+    if not RunGui.Parent then RunGui.Parent = playerGui end
+
+    local rf = new("Frame", {
+        Size = UDim2.new(0, 240, 0, 150), Position = UDim2.new(0.5, 160, 0.5, -75),
+        BackgroundColor3 = C.bg, BorderSizePixel = 0,
+    }, RunGui)
+    corner(rf, 12)
+    stroke(rf, C.panel2, 1)
+
+    local rbar = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 30), BackgroundColor3 = C.green, BorderSizePixel = 0,
+    }, rf)
+    corner(rbar, 12)
+    new("TextLabel", {
+        Size = UDim2.new(1, -40, 1, 0), Position = UDim2.new(0, 10, 0, 0),
+        BackgroundTransparency = 1, Text = "▶ SCRIPT (" .. #snapshot .. " khối)",
+        TextColor3 = C.text, Font = Enum.Font.GothamBold, TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, rbar)
+    local rClose = new("TextButton", {
+        Size = UDim2.new(0, 24, 0, 20), Position = UDim2.new(1, -30, 0.5, -10),
+        BackgroundColor3 = C.red, Text = "✕", TextColor3 = C.text,
+        Font = Enum.Font.GothamBold, TextSize = 12,
+    }, rbar)
+    corner(rClose, 5)
+    makeDraggable(rf, rbar)
+
+    local rStatus = new("TextLabel", {
+        Size = UDim2.new(1, -16, 0, 16), Position = UDim2.new(0, 8, 0, 36),
+        BackgroundTransparency = 1, Text = "Trạng thái: Sẵn sàng", TextColor3 = C.muted,
+        Font = Enum.Font.Gotham, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, rf)
+
+    new("TextLabel", {
+        Size = UDim2.new(1, -16, 0, 14), Position = UDim2.new(0, 8, 0, 54),
+        BackgroundTransparency = 1, Text = "Lặp: dùng khối 🔁 trong chương trình",
+        TextColor3 = C.muted, Font = Enum.Font.Gotham, TextSize = 9,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, rf)
+
+    local runThread
+    local actBtn = new("TextButton", {
+        Size = UDim2.new(1, -16, 0, 30), Position = UDim2.new(0, 8, 0, 72),
+        BackgroundColor3 = C.title, Text = "⚡ KÍCH HOẠT", TextColor3 = C.text,
+        Font = Enum.Font.GothamBold, TextSize = 13,
+    }, rf)
+    corner(actBtn, 7)
+    local stopBtn = new("TextButton", {
+        Size = UDim2.new(1, -16, 0, 24), Position = UDim2.new(0, 8, 0, 106),
+        BackgroundColor3 = C.red, Text = "⏹ DỪNG", TextColor3 = C.text,
+        Font = Enum.Font.GothamSemibold, TextSize = 11,
+    }, rf)
+    corner(stopBtn, 6)
+
+    local function stopRun()
+        isRunning = false
+        if runThread then pcall(function() task.cancel(runThread) end) runThread = nil end
+        pcall(function() localPlayer.CameraMode = Enum.CameraMode.Classic end)
+        actBtn.Text = "⚡ KÍCH HOẠT"
+        actBtn.BackgroundColor3 = C.title
+    end
+
+    actBtn.MouseButton1Click:Connect(function()
+        if isRunning then return end
+        if #snapshot == 0 then rStatus.Text = "Trạng thái: Chưa có khối nào!" return end
+        isRunning = true
+        activeStatusLabel = rStatus
+        actBtn.Text = "⏳ ĐANG CHẠY..."
+        actBtn.BackgroundColor3 = Color3.fromRGB(120, 95, 0)
+        runThread = task.spawn(function()
+            runCompiledScript(snapshot)
+            stopRun()
+            setStatus("Hoàn tất.")
+        end)
+    end)
+    stopBtn.MouseButton1Click:Connect(function()
+        stopRun()
+        rStatus.Text = "Trạng thái: Đã dừng."
+    end)
+    rClose.MouseButton1Click:Connect(function()
+        stopRun()
+        RunGui:Destroy()
+    end)
+
+    print("✅ Đã tạo script với " .. #snapshot .. " khối lệnh!")
+end
+
+CreateBtn.MouseButton1Click:Connect(buildRunMenu)
+ClearBtn.MouseButton1Click:Connect(function()
+    scriptBlocks = {}
+    renderScript()
+end)
+
+-- ============================================================
+-- [P] KHỞI TẠO
+-- ============================================================
+renderPositions()
+renderScript()
+print("✅ Full Macro v5.0 (Block Editor) đã tải! Kéo khối lệnh, bấm TẠO SCRIPT hoặc TẠO MÃ.")
