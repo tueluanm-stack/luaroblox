@@ -19,6 +19,232 @@ local MenuConfig = {
         end
     },
     {
+        Name = "Kích Hoạt Fly v1", 
+        Script = function()
+            --[[ 
+    MOBILE FLY SYSTEM V5 (THE ULTIMATE EDITION)
+    - Input: Sử dụng PlayerModule (Direct Joystick Data).
+    - Physics: LinearVelocity & AlignOrientation (Bypass Anti-cheat, mượt hơn).
+    - UX/UI: Tích hợp Slider kéo tốc độ siêu mượt cho Mobile + Hover Fix.
+]]
+
+local Player = game.Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ControlModule = require(Player.PlayerScripts:WaitForChild("PlayerModule")):GetControls()
+
+local Settings = {
+    FlySpeed = 50,
+    MinSpeed = 1,
+    MaxSpeed = 3000,
+    FlyEnabled = false, 
+    IsFlying = false,   
+    Mover = nil,
+    Aligner = nil,
+    Attach = nil
+}
+
+-- === 1. TẠO GIAO DIỆN MOBILE (NÚT + SLIDER) ===
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "MobileFlyGuiV5"
+ScreenGui.Parent = Player:WaitForChild("PlayerGui")
+ScreenGui.ResetOnSpawn = false
+
+-- Khung chứa chính (Kéo thả được toàn bộ)
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 150, 0, 110)
+MainFrame.Position = UDim2.new(0.1, 0, 0.4, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.BackgroundTransparency = 0.3
+MainFrame.Parent = ScreenGui
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 15)
+
+-- Nút Bật/Tắt
+local MainButton = Instance.new("TextButton")
+MainButton.Size = UDim2.new(0.9, 0, 0, 40)
+MainButton.Position = UDim2.new(0.05, 0, 0.1, 0)
+MainButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+MainButton.Text = "FLY: OFF"
+MainButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MainButton.Font = Enum.Font.GothamBold
+MainButton.TextSize = 14
+MainButton.Parent = MainFrame
+Instance.new("UICorner", MainButton).CornerRadius = UDim.new(0, 10)
+
+-- Tiêu đề Slider
+local SpeedLabel = Instance.new("TextLabel")
+SpeedLabel.Size = UDim2.new(1, 0, 0, 20)
+SpeedLabel.Position = UDim2.new(0, 0, 0.5, 0)
+SpeedLabel.BackgroundTransparency = 1
+SpeedLabel.Text = "Speed: 50"
+SpeedLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+SpeedLabel.Font = Enum.Font.Gotham
+SpeedLabel.Parent = MainFrame
+
+-- Khung Slider
+local SliderBack = Instance.new("Frame")
+SliderBack.Size = UDim2.new(0.8, 0, 0, 10)
+SliderBack.Position = UDim2.new(0.1, 0, 0.75, 0)
+SliderBack.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+SliderBack.Parent = MainFrame
+Instance.new("UICorner", SliderBack).CornerRadius = UDim.new(1, 0)
+
+-- Nút Kéo Slider
+local SliderKnob = Instance.new("TextButton")
+SliderKnob.Size = UDim2.new(0, 20, 0, 20)
+SliderKnob.Position = UDim2.new((Settings.FlySpeed - Settings.MinSpeed)/(Settings.MaxSpeed - Settings.MinSpeed), -10, 0.5, -10)
+SliderKnob.BackgroundColor3 = Color3.fromRGB(0, 255, 255)
+SliderKnob.Text = ""
+SliderKnob.Parent = SliderBack
+Instance.new("UICorner", SliderKnob).CornerRadius = UDim.new(1, 0)
+
+-- Logic kéo thả MainFrame
+local draggingFrame, dragStartFrame, startPosFrame
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingFrame = true
+        dragStartFrame = input.Position
+        startPosFrame = MainFrame.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if draggingFrame and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+        local delta = input.Position - dragStartFrame
+        MainFrame.Position = UDim2.new(startPosFrame.X.Scale, startPosFrame.X.Offset + delta.X, startPosFrame.Y.Scale, startPosFrame.Y.Offset + delta.Y)
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then draggingFrame = false end
+end)
+
+-- Logic Slider mượt mà
+local draggingSlider = false
+SliderKnob.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingSlider = true
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if draggingSlider and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+        local mouseX = input.Position.X
+        local sliderX = SliderBack.AbsolutePosition.X
+        local sliderWidth = SliderBack.AbsoluteSize.X
+        
+        -- Tính phần trăm (0 đến 1)
+        local percent = math.clamp((mouseX - sliderX) / sliderWidth, 0, 1)
+        SliderKnob.Position = UDim2.new(percent, -10, 0.5, -10)
+        
+        -- Cập nhật Speed
+        Settings.FlySpeed = math.floor(Settings.MinSpeed + (Settings.MaxSpeed - Settings.MinSpeed) * percent)
+        SpeedLabel.Text = "Speed: " .. Settings.FlySpeed
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then draggingSlider = false end
+end)
+
+-- === 2. LOGIC FLY (MODERN CONSTRAINTS) ===
+
+local function StopFly()
+    Settings.IsFlying = false
+    if Settings.Mover then Settings.Mover:Destroy(); Settings.Mover = nil end
+    if Settings.Aligner then Settings.Aligner:Destroy(); Settings.Aligner = nil end
+    if Settings.Attach then Settings.Attach:Destroy(); Settings.Attach = nil end
+    
+    local Character = Player.Character
+    if Character then
+        local Hum = Character:FindFirstChildOfClass("Humanoid")
+        if Hum then Hum:ChangeState(Enum.HumanoidStateType.GettingUp) end
+    end
+end
+
+local function StartFly()
+    if Settings.IsFlying then return end
+    local Character = Player.Character
+    if not Character then return end
+    local Root = Character:FindFirstChild("HumanoidRootPart")
+    local Hum = Character:FindFirstChildOfClass("Humanoid")
+    if not Root or not Hum then return end
+
+    Settings.IsFlying = true
+    -- Tắt vật lý đi bộ, đổi state để không bị rớt
+    Hum:ChangeState(Enum.HumanoidStateType.Physics) 
+    
+    -- TẠO CÔNG NGHỆ MỚI (CONSTRAINTS)
+    local Attach = Instance.new("Attachment", Root)
+    Settings.Attach = Attach
+    
+    local LinearVel = Instance.new("LinearVelocity", Root)
+    LinearVel.Attachment0 = Attach
+    LinearVel.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+    LinearVel.RelativeTo = Enum.ActuatorRelativeTo.World
+    LinearVel.MaxForce = math.huge
+    LinearVel.VectorVelocity = Vector3.new(0, 0, 0)
+    Settings.Mover = LinearVel
+    
+    local AlignOri = Instance.new("AlignOrientation", Root)
+    AlignOri.Mode = Enum.OrientationAlignmentMode.OneAttachment
+    AlignOri.Attachment0 = Attach
+    AlignOri.MaxTorque = math.huge
+    AlignOri.Responsiveness = 200 -- Tốc độ xoay cực nhanh và mượt
+    AlignOri.CFrame = Root.CFrame
+    Settings.Aligner = AlignOri
+
+    task.spawn(function()
+        while Settings.FlyEnabled and Settings.IsFlying and Character and Character.Parent and Hum.Health > 0 do
+            RunService.RenderStepped:Wait()
+            local Cam = workspace.CurrentCamera
+            
+            -- Lấy Joystick Vector chuẩn chỉnh từ bạn!
+            local moveVector = ControlModule:GetMoveVector()
+            
+            if moveVector.Magnitude > 0 then
+                -- Bay chuẩn 3D
+                local flyDir = (Cam.CFrame.RightVector * moveVector.X) + (Cam.CFrame.LookVector * -moveVector.Z)
+                LinearVel.VectorVelocity = flyDir.Unit * Settings.FlySpeed
+                
+                -- Xoay kiểu Superman
+                AlignOri.CFrame = Cam.CFrame
+            else
+                -- Hover mượt mà
+                LinearVel.VectorVelocity = Vector3.new(0, 0.1, 0) -- Giữ trên không nhẹ nhàng
+                
+                -- Fix UX: Nhìn thẳng theo Camera nhưng không gật gù
+                local camLook = Cam.CFrame.LookVector
+                AlignOri.CFrame = CFrame.lookAt(Root.Position, Root.Position + Vector3.new(camLook.X, 0, camLook.Z))
+            end
+        end
+        StopFly()
+    end)
+end
+
+MainButton.Activated:Connect(function()
+    Settings.FlyEnabled = not Settings.FlyEnabled
+    if Settings.FlyEnabled then
+        MainButton.Text = "FLY: ON"
+        MainButton.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
+        StartFly()
+    else
+        MainButton.Text = "FLY: OFF"
+        MainButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+        StopFly()
+    end
+end)
+
+Player.CharacterAdded:Connect(function(newCharacter)
+    if Settings.FlyEnabled then
+        newCharacter:WaitForChild("HumanoidRootPart")
+        newCharacter:WaitForChild("Humanoid")
+        task.wait(0.5) 
+        if Settings.FlyEnabled then StartFly() end
+    end
+end)
+
+print("Mobile Fly System V5 (Slider + LinearVelocity) Loaded!")
+            print("Đã bật Flyv1")
+        end
+    },
+    {
         Name = "Nhận Bản Đồ / Tool", -- Tên nút 3
         Script = function()
             -- Cho phép chạy script dạng loadstring từ bên ngoài
@@ -593,6 +819,147 @@ print("Fixed drag bug hoàn toàn!")
         Script = function()
              loadstring(game:HttpGet("https://raw.githubusercontent.com/tueluanm-stack/luaroblox/refs/heads/main/thehouse4"))()
             print("Script 4 hoạt động!")
+        end
+    },
+    {
+        Name = "4 Tổ hợp màn 4", -- Tên nút 🏷️
+        Script = function()
+            -- Khai báo các dịch vụ cần thiết
+local Players = game:GetService("Players")
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+local buttonPaths = {
+    PlayAgain   = "MainHud.Menus.GameOver.Menu.OptionButtons.PlayAgain",
+    Play        = "MainHud.Elements.MapModeVote.MapsVoting.Elevator.Main.MenuList.RoomList.PlayButton",
+    Difficulty3 = "MainHud.Elements.DifficultyVote.Listings.FlashList.1.Content.4.2.ListItem.Item.Content.ChooseButton",
+    StartGame   = "MainHud.Elements.StartGame.StartGameButton"
+}
+
+-- [MỚI] Bảng lưu trữ thời gian Cooldown để chống Spam Click
+local clickCooldowns = {}
+local COOLDOWN_TIME = 2.5 -- Đợi 2.5 giây sau khi ấn mới được ấn lại NÚT ĐÓ
+
+local function safeClick(button)
+    if button and button.Visible and button.Active then
+        local guiService = game:GetService("GuiService")
+        local oldSelected = guiService.SelectedObject
+        
+        guiService.SelectedObject = button
+        task.wait(0.01)
+        
+        local clicked = false
+        
+        pcall(function()
+            if getconnections then
+                for _, connection in pairs(getconnections(button.MouseButton1Click)) do connection:Fire() clicked = true end
+                for _, connection in pairs(getconnections(button.MouseButton1Down)) do connection:Fire() clicked = true end
+                for _, connection in pairs(getconnections(button.Activated)) do connection:Fire() clicked = true end
+            end
+        end)
+        
+        if not clicked then
+            pcall(function()
+                if button:IsA("TextButton") or button:IsA("ImageButton") then
+                    button:SimulateClick()
+                    clicked = true
+                end
+            end)
+        end
+        
+        if not clicked then
+            pcall(function()
+                local virtualInput = game:GetService("VirtualInputManager")
+                virtualInput:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
+                virtualInput:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
+            end)
+        end
+        
+        guiService.SelectedObject = oldSelected
+    end
+end
+
+local function findButtonByPath(path)
+    local current = playerGui
+    for name in string.gmatch(path, "[^.]+") do
+        if current then
+            current = current:FindFirstChild(name)
+        else
+            return nil
+        end
+    end
+    return current
+end
+
+local function isButtonGloballyVisible(button)
+    if not button then return false end
+    
+    local current = button
+    while current and current ~= playerGui do
+        if current:IsA("GuiObject") and not current.Visible then
+            return false
+        end
+        current = current.Parent
+    end
+    return true
+end
+
+local function checkAndClickAll()
+    local currentTime = os.clock() -- Lấy thời gian hiện tại của hệ thống (chính xác hơn tick)
+    
+    for name, path in pairs(buttonPaths) do
+        local button = findButtonByPath(path)
+        
+        if button and isButtonGloballyVisible(button) then
+            -- [MỚI] Kiểm tra Cooldown: Nếu chưa từng click, hoặc thời gian trôi qua đã lớn hơn COOLDOWN_TIME
+            if not clickCooldowns[name] or (currentTime - clickCooldowns[name]) >= COOLDOWN_TIME then
+                
+                clickCooldowns[name] = currentTime -- Ghi nhận lại thời gian vừa click
+                safeClick(button)
+                print("[Auto Farm] Đã ấn: " .. name)
+                
+                task.wait(0.25) -- Nghỉ 1 nhịp siêu nhỏ giữa các nút khác nhau
+            end
+        end
+    end
+end
+
+local function setupListeners()
+    for name, path in pairs(buttonPaths) do
+        local button = findButtonByPath(path)
+        if button then
+            if not button:GetAttribute("AutoClickConnected") then
+                -- CHỈ lắng nghe sự kiện Visible (Ẩn/Hiện), gỡ bỏ .Changed để chống lag
+                button:GetPropertyChangedSignal("Visible"):Connect(checkAndClickAll)
+                button:SetAttribute("AutoClickConnected", true)
+            end
+        end
+    end
+end
+
+task.spawn(setupListeners)
+
+playerGui.DescendantAdded:Connect(function(descendant)
+    for name, path in pairs(buttonPaths) do
+        local lastName = string.match(path, "[^.]+$")
+        if descendant.Name == lastName then
+            task.wait(0.1)
+            setupListeners()
+            checkAndClickAll()
+            break
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.5) do
+        checkAndClickAll()
+    end
+end)
+
+print("[Auto Farm] Đã nạp chống lag (Cooldown). Script sẵn sàng!")
+
+            print("Đã bật 4 TH màn 4")
         end
     },
     {
